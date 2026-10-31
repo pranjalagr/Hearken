@@ -11,12 +11,15 @@ be kept. A crash rolls everything back, so a half-done action can never exist.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
 
 from engine.contract.action import Action, ActionContext, clean_inputs
 from engine.contract.pack import Pack
+from engine.contract.spoken import LANGUAGES
+from engine.lab_controls.bells import ARRIVED, NO_BELLS, PREPARED, SAVED, SAVING, BellLine
 from engine.lab_controls.clock import Clock
 from engine.lab_controls.switches import AFTER_SAVE, FAIL, REPLY_LOST, SLOW, Switch, Switchboard
 from engine.lab_controls.timeline import Timeline, done_event, prepared_event
@@ -31,6 +34,8 @@ from engine.storage.database import Database, Tx
 
 Sleep = Callable[[float], Awaitable[None]]
 
+_log = logging.getLogger(__name__)
+
 
 class Backend:
     def __init__(
@@ -41,14 +46,19 @@ class Backend:
         settings: CallSettings,
         lifetimes: Lifetimes = Lifetimes(),
         sleep: Sleep = asyncio.sleep,  # tests can pass a fake to skip real waiting
+        bells: BellLine = NO_BELLS,  # the lab's director listens here (Part 3, C10)
     ) -> None:
         self._db = db
         self._clock = clock
         self._settings = settings
         self._lifetimes = lifetimes
         self._sleep = sleep
+        self._bells = bells
         self._actions = {action.name: action for action in pack.actions()}
         _check_action_names(self._actions)
+        # Read once per call: a bad file then fails when the call starts, not
+        # in the middle of a yes-question.
+        self._words = pack.spoken_words()
         self._tokens = TokenBook()
         self._tickets = TicketBook()
         self._timeline = Timeline(pack)
@@ -91,6 +101,11 @@ class Backend:
         if problem:
             return await self._refuse_alone(tool, raw, problem, action=action.name)
         switch = await self._peek_switch(action.name)
+        if action.risky:
+            # Plain mode has no confirm: the action call itself is the one that
+            # "arrives" and then runs (race moments 2 and 3).
+            self._ring(ARRIVED, action.name)
+            self._ring(SAVING, action.name)
         await self._wait_before_work(self._settings.delays.for_action(action.risky), switch)
         async with self._db.transaction() as tx:
             now = self._clock.now()
@@ -106,6 +121,9 @@ class Backend:
             data = await action.do(tx, inputs, ActionContext(now=now, token=None))
             await self._timeline.fire_event(tx, done_event(action.name), now)
             await self._log.write(tx, replace(draft, outcome=OK, acted=True, switch_note=_note(switch)))
+        if action.risky:
+            # After the commit, before the reply goes out: race moment 4.
+            self._ring(SAVED, action.name)
         reply = ToolReply(OK, f"Done: {summary}." if summary else "OK.", data)
         return await self._deliver(reply, switch)
 
@@ -138,13 +156,24 @@ class Backend:
                 await self._log.write(
                     tx, replace(draft, outcome=OK, reason="same request: same token", token=waiting.token)
                 )
-                return _prepared(waiting)
-            summary = await action.summarize(tx, inputs)
-            prepared = await self._tokens.create(
-                tx, action.name, inputs, key, summary, now, now + self._lifetimes.prepared_s
-            )
-            await self._timeline.fire_event(tx, prepared_event(action.name), now)
-            await self._log.write(tx, replace(draft, outcome=OK, token=prepared.token))
+                prepared = waiting
+            else:
+                summary = await action.summarize(tx, inputs)
+                # Worked out in the same transaction as the summary, so the amount
+                # the caller hears is the amount the token was prepared for.
+                question = await action.spoken_question(tx, inputs)
+                questions = (
+                    {language: self._words.yes_question(question, language) for language in LANGUAGES}
+                    if question
+                    else {}
+                )
+                prepared = await self._tokens.create(
+                    tx, action.name, inputs, key, summary, now, now + self._lifetimes.prepared_s, questions
+                )
+                await self._timeline.fire_event(tx, prepared_event(action.name), now)
+                await self._log.write(tx, replace(draft, outcome=OK, token=prepared.token))
+        # Rung for a reused token too: the yes-question is about to be asked again.
+        self._ring(PREPARED, action.name)
         return _prepared(prepared)
 
     # ---- safe mode, step 2: confirm -----------------------------------------------
@@ -163,6 +192,9 @@ class Backend:
         async with self._db.transaction(write=False) as tx:
             peeked = await self._tokens.get(tx, token_id)
             switch = await self._switches.peek(tx, peeked.action) if peeked else None
+        if peeked is not None:
+            self._ring(ARRIVED, peeked.action)
+            self._ring(SAVING, peeked.action)
         await self._wait_before_work(self._settings.delays.change_s, switch)
 
         async with self._db.transaction() as tx:
@@ -214,9 +246,21 @@ class Backend:
                 await self._tickets.mark_used(tx, ticket_id, now)
             await self._timeline.fire_event(tx, done_event(action.name), now)
             await self._log.write(tx, replace(draft, outcome=OK, acted=True, switch_note=_note(switch)))
+        # Only reached when the change really happened: every refusal above
+        # returned from inside the transaction. Rung after the commit, before
+        # the reply goes out: race moment 4.
+        self._ring(SAVED, action.name)
         return await self._deliver(reply, switch)
 
     # ---- shared helpers ---------------------------------------------------------
+
+    def _ring(self, bell: str, action: str) -> None:
+        """A bell for the lab's director. A broken bell line is logged and
+        ignored: the lab's needs must never break a real money action."""
+        try:
+            self._bells.ring(bell, action, self._clock.now())
+        except Exception:
+            _log.exception("bell %s for %s could not ring", bell, action)
 
     async def _peek_switch(self, action: str) -> Switch | None:
         async with self._db.transaction(write=False) as tx:

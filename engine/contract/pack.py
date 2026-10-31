@@ -5,9 +5,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
+from typing import TYPE_CHECKING
+
 from engine.contract.action import Action, Check
 from engine.contract.spoken import SpokenWords
 from engine.storage.database import Tx
+
+if TYPE_CHECKING:  # only for the type hint: tasks import packs, not the other way round
+    from engine.tasks.task_file import Task
 
 
 class Pack(ABC):
@@ -42,3 +47,13 @@ class Pack(ABC):
         has none, and asking it for a phrase fails loudly.
         """
         return SpokenWords()
+
+    async def check_caller(self, tx: Tx, task: Task) -> list[str]:
+        """Problems with the task's caller facts, checked against the starting
+        data (Part 3, C6). A wrong fact is a task bug: the pretend caller
+        would say it, and the robot would be blamed for refusing it.
+
+        A pack that never runs pretend callers can't vouch for any fact, so
+        by default every caller is refused.
+        """
+        return [f"pack {self.name} cannot check caller facts"]

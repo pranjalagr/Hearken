@@ -1,7 +1,8 @@
-"""Spoken words: the engine's loader and its load-time checks."""
+"""Spoken words: the engine's loader, its load-time checks, and yes-questions."""
 
 import pytest
 
+from engine.contract.action import SpokenQuestion
 from engine.contract.spoken import SpokenWords
 from packs.toy.pack import ToyPack
 
@@ -56,3 +57,58 @@ def test_a_pack_without_spoken_words_fails_loudly_when_asked():
     assert words.values("status") == set()
     with pytest.raises(KeyError):
         words.phrase("status", "anything", "english")
+
+
+QUESTIONS = """
+place:
+  shelf:
+    hinglish: "shelf"
+    english: "the shelf"
+yes_question:
+  move:
+    hinglish: "{thing} {place} par rakh doon? Haan ya nahi?"
+    english: "Shall I put {thing} on {place}? Yes or no?"
+"""
+
+
+def test_a_yes_question_is_filled_with_values_and_phrases(tmp_path):
+    words = SpokenWords.from_yaml(write(tmp_path, QUESTIONS))
+    question = SpokenQuestion("move", values={"thing": "box 7"}, phrases={"place": ("place", "shelf")})
+    assert words.yes_question(question, "hinglish") == "box 7 shelf par rakh doon? Haan ya nahi?"
+    assert words.yes_question(question, "english") == "Shall I put box 7 on the shelf? Yes or no?"
+
+
+def test_braces_inside_a_value_are_kept_as_they_are(tmp_path):
+    """A caller's address could contain braces; they must not be read as placeholders."""
+    words = SpokenWords.from_yaml(write(tmp_path, QUESTIONS))
+    question = SpokenQuestion("move", values={"thing": "Flat {5}"}, phrases={"place": ("place", "shelf")})
+    assert words.yes_question(question, "english") == "Shall I put Flat {5} on the shelf? Yes or no?"
+
+
+def test_a_yes_question_with_a_missing_value_fails_loudly(tmp_path):
+    words = SpokenWords.from_yaml(write(tmp_path, QUESTIONS))
+    with pytest.raises(KeyError):
+        words.yes_question(SpokenQuestion("move", phrases={"place": ("place", "shelf")}), "english")
+
+
+def test_a_yes_question_must_end_with_the_closed_question(tmp_path):
+    """The Guard always judges an answer to the same "yes or no"."""
+    text = 'yes_question:\n  move:\n    hinglish: "Rakh doon?"\n    english: "Shall I? Yes or no?"\n'
+    with pytest.raises(ValueError, match="must end with 'Haan ya nahi\\?'"):
+        SpokenWords.from_yaml(write(tmp_path, text))
+
+
+async def test_a_pack_without_questions_still_prepares_but_has_no_question(open_call):
+    kit = await open_call(ToyPack())
+    prepared = await kit.tool("prepare_move_money", from_box="a", to_box="b", amount_paise=500)
+    assert prepared.status == "ok"
+    with pytest.raises(LookupError, match="no spoken question"):
+        await kit.guard.question(prepared.data["token"], "hinglish")
+
+
+async def test_the_guard_refuses_an_unknown_token_or_language(open_call):
+    kit = await open_call(ToyPack())
+    with pytest.raises(LookupError, match="unknown token"):
+        await kit.guard.question("T-99", "hinglish")
+    with pytest.raises(ValueError, match="unknown language"):
+        await kit.guard.question("T-1", "tamil")

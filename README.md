@@ -4,9 +4,18 @@ A Hinglish voice agent that listens carefully: it tells "haan" (go on) from
 "ruko" (stop) and acts only on a real yes. (The code folder is still called
 `pakka`, the project's first working name.)
 
-Hinglish voice agent backend: safe actions and race tests. This folder is
-**Part 1**, the pretend business the agents talk to. The plan and every design
-decision live in `../hinglish_voice_agent_project.md` (one folder up).
+What is here so far:
+- **the backend** (Part 1): the pretend food business the robots talk to, with
+  safe actions, breakdown switches and race tests;
+- **the wire**: the one WebSocket line every caller and robot speaks, plus
+  audio helpers and a stopwatch;
+- **the call box**: everything one call runs, ended cleanly when the call ends;
+- **the test lab's first parts**: the bell board, the director (exact-moment
+  race lines and drops), the dummy robot, the caller's number words, and a web
+  phone to call any robot from the browser.
+
+The plan and every design decision are kept in a separate document, not in
+this repo.
 
 ## Setup (Windows, PowerShell)
 
@@ -16,6 +25,9 @@ python -m venv .venv
 pip install -r requirements.txt
 pytest
 ```
+
+Node.js is optional: if it is installed, `pytest` also runs the web phone's
+JavaScript tests (otherwise they are skipped).
 
 This folder is inside OneDrive. The tests keep their databases in the system
 temp folder, so syncing never touches them. Call copies made by `cli.make_call`
@@ -35,28 +47,84 @@ python -m cli.serve_call --db <printed path>
 python -m cli.measure_backend
 ```
 
+### Call a robot from the browser
+
+```powershell
+# window 1: the echo robot plays your voice back 2 seconds later
+python -m cli.dummy_robot
+
+# window 2: the web phone page
+python -m cli.phone_page
+```
+
+Open http://127.0.0.1:8080 in Chrome or Edge, press **Call**, allow the
+microphone, and say something: it comes back 2 seconds later, at phone
+quality (8 kHz). The keypad sends keys, and **Silent drop (test)** makes the
+line go dead without a goodbye, to test a robot's "no audio for 30 s" rule.
+
+## The wire
+
+One WebSocket per call. Audio goes as binary frames, each exactly one 20 ms
+piece: 160 samples of 16-bit little-endian PCM at 8 kHz (320 bytes). Control
+messages are one JSON object per text frame:
+
+| From | Message | Meaning |
+|---|---|---|
+| caller | `start` | the call begins (first message) |
+| robot | `mark` | "tell me when the audio before this has played" |
+| caller | `played` | it has, at `caller_ms` |
+| robot | `clear` | stop playing; throw away what is not yet played |
+| caller | `cleared` | how many robot pieces were really heard, and which marks were dropped |
+| caller | `key` | a keypad key |
+| either | `end` | a clean hang-up |
+
+The caller sends one piece every 20 ms for the whole call, so "20 ms x pieces
+sent" is a clock both sides read exactly (`caller_ms`). The robot sends its
+audio as fast as its voice service makes it; the caller's speaker keeps the
+real speed. Anything off-spec is cut off with close code 1002.
+
 ## Folders
 
 ```
 engine/                 knows nothing about any business
-  contract/             the Action and Pack shapes every pack fills in
+  contract/             the Action and Pack shapes every pack fills in, and spoken words
   storage/              database interface + SQLite, engine tables, per-call copies, call settings
   safety/               tokens (only once), yes-tickets (only after a real yes), the Guard's door
-  lab_controls/         pretend clock, breakdown switches, timeline
+  lab_controls/         pretend clock, breakdown switches, timeline, normal delays, bells
   records/              the action log
   service/              backend (front desk), tool catalog, replies, MCP server
-  tasks/                task files: load, set up a call, check the result
+  tasks/                task files (with the caller: section): load, set up a call, check the result
 packs/
   food/                 the food-delivery pack: tables, seed, rules, actions, tasks,
-                        and spoken.yaml (ready phrases the robot says out loud)
+                        caller-fact checks, and spoken.yaml (ready phrases said out loud)
   toy/                  a tiny pack used only to prove the engine works without food
   registry.py           the only place that lists every pack
-cli/                    command-line entry points (wires engine + packs together)
+common/                 shared by robots and callers
+  wire/                 the WebSocket line: messages, the caller's speaker, the beat, both ends
+  audio/                PCM, resampling, phone sound, background noise, sound files
+  stopwatch.py          time stamps for every step of a call
+agents/
+  common/call_box.py    one box per call: ends cleanly, shields a change already sent
+lab/
+  bell_board.py         where backends ring their bells for the director
+  caller/director/      exact-moment race lines, tricks and drop tests
+  caller/mouth/         the caller's number words (kept apart from any robot code)
+  dummy_robot/          the puppet robot (fixed script) and the echo robot
+  web_phone/            the browser phone (its logic is tested with Node)
+  synthetic_voice.py    a stand-in voice until the real ones are picked
+cli/                    command-line entry points
 tests/
   engine/               engine tests, run on the toy pack
-  food/                 food rules, actions and races
+  food/                 food rules, actions, races and spoken words
   end_to_end/           tasks checked by the task checker, and a real MCP server process
+  common/               the wire (parts and real calls), audio, stopwatch, freeze check
+  agents/               the call box
+  lab/                  bells, director, dummy robot, whole lab calls, number words, web phone
 ```
+
+Tests that run live audio also check that the event loop never freezes for
+over 100 ms (Part 2 decision 14): a heartbeat ticks every 10 ms, and a
+watcher thread names the code that was running if it is late.
 
 ## How one tool call works
 
@@ -73,6 +141,9 @@ Then it is one write transaction:
 In safe mode a risky action takes two steps:
 
 1. `prepare_<action>` checks the rules and saves a **token**. Nothing changes yet.
+   With the token it saves the exact **yes-question** the caller will hear, in
+   Hinglish and English, filled in from the pack's `spoken.yaml`. Agent code
+   reads it through the Guard's door; it is not in the AI's tool reply.
 2. `confirm(token, ticket)` checks, in this order:
    1. token already done? → "already done", even if it has expired
    2. token expired?

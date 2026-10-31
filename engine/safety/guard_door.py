@@ -7,6 +7,7 @@ GuardDoor, so the AI has no way to approve its own actions.
 
 from __future__ import annotations
 
+from engine.contract.spoken import LANGUAGES
 from engine.lab_controls.clock import Clock
 from engine.safety.lifetimes import Lifetimes
 from engine.safety.tickets import TicketBook
@@ -25,6 +26,23 @@ class GuardDoor:
         self._lifetimes = lifetimes
         self._tokens = TokenBook()
         self._tickets = TicketBook()
+
+    async def question(self, token: str, language: str) -> str:
+        """The exact yes-question for this token, as the caller should hear it.
+
+        Read here, not from the AI's tool reply: the words come straight from
+        the backend, so no AI can change or shorten them (Part 2 decision 9).
+        The tool reply stays as it was, so what Agents A and B read is unchanged.
+        """
+        if language not in LANGUAGES:
+            raise ValueError(f"unknown language {language!r}, expected one of {LANGUAGES}")
+        async with self._db.transaction(write=False) as tx:
+            prepared = await self._tokens.get(tx, token)
+        if prepared is None:
+            raise LookupError(f"unknown token {token}")
+        if language not in prepared.questions:
+            raise LookupError(f"token {token} has no spoken question (its pack has no spoken words)")
+        return prepared.questions[language]
 
     async def issue_ticket(self, token: str) -> str:
         """The caller said a real yes to this token's summary: write a yes-ticket."""

@@ -5,6 +5,18 @@ goal: >
   paid by card) and changed your mind. Cancel it and make sure the money comes
   back to your card.
 uses: [4521]
+caller:
+  name: Rahul Verma
+  facts:
+    order_no: 4521
+    paid_by: card
+  wants: cancel order 4521 and get the money back on the card
+  personality: patient
+  language: mixed
+  voice: male_young
+  number_style: hindi_digits
+  tricks: []
+  opening_line: "Hello, mera order cancel karna hai."
 expect:
   - table: orders
     where: {order_no: 4521}

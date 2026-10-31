@@ -19,8 +19,16 @@ from typing import Any
 
 import yaml
 
+from engine.contract.action import SpokenQuestion
+
 # Part 2 decision 12: the robot mirrors the caller's mix, Hinglish or English.
 LANGUAGES = ("hinglish", "english")
+
+# The group holding each risky action's yes-question lines (Part 2 decision 9).
+YES_QUESTION = "yes_question"
+# Every yes-question ends with a closed question, in the same words each time,
+# so the Guard always judges an answer to "yes or no" and nothing looser.
+QUESTION_ENDINGS = {"hinglish": "Haan ya nahi?", "english": "Yes or no?"}
 
 # Part 2 decision 12: English letters everywhere ("haan", not "हाँ"), so every
 # part of the system matches the same word the same way.
@@ -55,6 +63,20 @@ class SpokenWords:
     def values(self, group: str) -> set[str]:
         return set(self.groups.get(group, {}))
 
+    def yes_question(self, question: SpokenQuestion, language: str) -> str:
+        """Fill the action's line with its values, and its phrases in `language`.
+
+        A placeholder with no value raises KeyError: the question must never
+        be spoken with a hole in it.
+        """
+        template = self.phrase(YES_QUESTION, question.line, language)
+        filled = dict(question.values)
+        for name, (group, value) in question.phrases.items():
+            filled[name] = self.phrase(group, value, language)
+        # str.format reads only the template, so braces inside a caller's
+        # address are copied as they are, never treated as placeholders.
+        return template.format(**filled)
+
 
 def _problems(group: str, values: Any) -> list[str]:
     if not isinstance(values, dict) or not values:
@@ -70,4 +92,6 @@ def _problems(group: str, values: Any) -> list[str]:
                 problems.append(f"{where}.{language} is empty")
             elif _DEVANAGARI.search(text):
                 problems.append(f"{where}.{language} uses Hindi script; write it in English letters")
+            elif group == YES_QUESTION and not text.rstrip().endswith(QUESTION_ENDINGS[language]):
+                problems.append(f"{where}.{language} must end with {QUESTION_ENDINGS[language]!r}")
     return problems

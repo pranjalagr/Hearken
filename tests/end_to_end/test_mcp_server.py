@@ -6,6 +6,7 @@ on its own connection, exactly as the Guard will do in Part 2: the door is
 never offered as a tool.
 """
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -14,21 +15,24 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from cli.make_call import main as make_call
+from engine.lab_controls.bells import ARRIVED, PREPARED, SAVED, SAVING
 from engine.lab_controls.clock import WallClock
 from engine.safety.guard_door import GuardDoor
 from engine.storage.call_settings import read_call_settings
 from engine.storage.database import sqlite_session
+from lab.bell_board import BellBoard
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TASK = PROJECT_ROOT / "packs" / "food" / "tasks" / "food_01_cancel_prepaid.yaml"
 RAHUL = {"order_no": 4521, "customer_name": "Rahul Verma"}
 
 
-def server_for(db_path):
+def server_for(db_path, bells_url=None):
     # One server process per call; the --db argument is the only way to pick the copy.
-    return StdioServerParameters(
-        command=sys.executable, args=["-m", "cli.serve_call", "--db", str(db_path)], cwd=str(PROJECT_ROOT)
-    )
+    args = ["-m", "cli.serve_call", "--db", str(db_path)]
+    if bells_url:
+        args += ["--bells", bells_url]
+    return StdioServerParameters(command=sys.executable, args=args, cwd=str(PROJECT_ROOT))
 
 
 async def call(session, tool, **arguments):
@@ -84,6 +88,35 @@ async def test_safe_mode_over_mcp_cancels_once(tmp_path):
         ("confirm", "ok", 1),  # the one real cancel
         ("confirm", "already_done", 0),
     ]
+
+
+async def test_the_real_server_rings_the_labs_bells(tmp_path):
+    """The whole bell path: server process -> socket -> the lab's bell board."""
+    db_path = await make_call(str(TASK), "safe", True, str(tmp_path))
+    async with sqlite_session(db_path) as db:
+        call_id = (await read_call_settings(db)).call_id
+    board = BellBoard()
+    url = await board.start()
+    try:
+        async with stdio_client(server_for(db_path, url)) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                prepared, _ = await call(session, "prepare_cancel_order", **RAHUL)
+                async with sqlite_session(db_path) as guard_db:
+                    settings = await read_call_settings(guard_db)
+                    guard = GuardDoor(guard_db, WallClock(settings.started_at_wall))
+                    ticket = await guard.issue_ticket(prepared["data"]["token"])
+                done, _ = await call(session, "confirm", token=prepared["data"]["token"], ticket=ticket)
+                assert done["status"] == "ok"
+                queue = board.bells_for(call_id)
+                rung = [await asyncio.wait_for(queue.get(), 10) for _ in range(4)]
+    finally:
+        await board.close()
+    assert [(h.bell.bell, h.bell.action) for h in rung] == [
+        (PREPARED, "cancel_order"), (ARRIVED, "cancel_order"), (SAVING, "cancel_order"), (SAVED, "cancel_order"),
+    ]
+    # The real normal delay: the save came at least 0.8 s after the confirm arrived.
+    assert rung[3].bell.at - rung[2].bell.at >= 0.8
 
 
 async def test_plain_mode_over_mcp_shows_plain_tools_and_reports_timeouts_as_errors(tmp_path):

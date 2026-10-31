@@ -5,8 +5,9 @@
 # Part 2 decision 12: English letters only, and a Hinglish and an English
 # version of each, so the robot can follow the caller's language.
 #
-# Change wording here, never in code. Every status in rules.py must have a
-# phrase (a test checks it).
+# Change wording here, never in code. Tests check that every status, refund
+# reason and prepaid payment method has a phrase, and that every risky
+# action's yes-question exists.
 
 status:
   placed:
@@ -24,3 +25,43 @@ status:
   cancelled:
     hinglish: "Aapka order cancel ho chuka hai."
     english: "Your order has been cancelled."
+
+# Where refund money goes. Only prepaid methods: a cash order is never refunded by phone.
+payment_method:
+  upi:
+    hinglish: "UPI"
+    english: "UPI"
+  card:
+    hinglish: "card"
+    english: "card"
+
+# Why an item refund is given, as said inside the refund question ("kyunki ...").
+refund_reason:
+  missing_item:
+    hinglish: "item missing tha"
+    english: "an item was missing"
+  wrong_item:
+    hinglish: "galat item aaya tha"
+    english: "you got the wrong item"
+  damaged_item:
+    hinglish: "item kharab tha"
+    english: "an item was damaged"
+
+# Part 2 decision 9: the yes-question, filled in by code with the backend's own
+# numbers. Each one must end with "Haan ya nahi?" / "Yes or no?" (checked on load),
+# so the Guard always judges an answer to the same closed question.
+# Placeholders: {order_no} {amount} {new_address} as given; {payment} {reason}
+# come from the groups above, in the caller's language.
+yes_question:
+  cancel_with_refund:
+    hinglish: "Order {order_no} cancel karke {amount} aapke {payment} par wapas kar doon? Haan ya nahi?"
+    english: "Shall I cancel order {order_no} and send {amount} back to your {payment}? Yes or no?"
+  cancel_no_refund:
+    hinglish: "Order {order_no} cancel kar doon? Cash on delivery tha, toh koi refund nahi banega. Haan ya nahi?"
+    english: "Shall I cancel order {order_no}? It was cash on delivery, so there is nothing to refund. Yes or no?"
+  refund:
+    hinglish: "Order {order_no} par {amount} aapke {payment} par wapas bhej doon, kyunki {reason}? Haan ya nahi?"
+    english: "Shall I send {amount} back to your {payment} for order {order_no}, because {reason}? Yes or no?"
+  change_address:
+    hinglish: "Order {order_no} ka address badal kar \"{new_address}\" kar doon? Haan ya nahi?"
+    english: "Shall I change the address of order {order_no} to \"{new_address}\"? Yes or no?"

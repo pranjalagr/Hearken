@@ -5,6 +5,18 @@ goal: >
   sister's place, so change the address to
   "Flat 2C, Rose Apartments, Model Town, Ludhiana".
 uses: [4561]
+caller:
+  name: Priya Sharma
+  facts:
+    order_no: 4561
+    new_address: "Flat 2C, Rose Apartments, Model Town, Ludhiana"
+  wants: change the delivery address of order 4561 to the new address
+  personality: patient
+  language: mostly_english
+  voice: female_young
+  number_style: english_digits
+  tricks: []
+  opening_line: "Hi, I need to change the delivery address of my order."
 expect:
   - table: orders
     where: {order_no: 4561}

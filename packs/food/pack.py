@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from engine.contract.action import Action, Check
 from engine.contract.pack import Pack
@@ -12,6 +13,10 @@ from engine.storage.database import Tx
 from packs.food import order_store as store
 from packs.food import rules
 from packs.food.actions import CancelOrder, ChangeAddress, FindOrder, HandOverToHuman, RefundOrder
+from packs.food.caller_facts import caller_fact_problems
+
+if TYPE_CHECKING:
+    from engine.tasks.task_file import Task
 
 HERE = Path(__file__).parent
 
@@ -27,6 +32,9 @@ class FoodPack(Pack):
 
     def spoken_words(self) -> SpokenWords:
         return SpokenWords.from_yaml(HERE / "spoken.yaml")
+
+    async def check_caller(self, tx: Tx, task: Task) -> list[str]:
+        return await caller_fact_problems(tx, task)
 
     async def load_seed(self, tx: Tx) -> None:
         seed = json.loads((HERE / "seed.json").read_text(encoding="utf-8"))

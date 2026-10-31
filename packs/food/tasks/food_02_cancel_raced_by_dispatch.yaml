@@ -4,6 +4,19 @@ goal: >
   You are Aman Gupta. Cancel order 4530 (paid by UPI). While the agent is
   asking "cancel kar doon?", the rider picks the order up.
 uses: [4530]
+# The caller doesn't know about the rider: that is the timeline's secret (C6).
+caller:
+  name: Aman Gupta
+  facts:
+    order_no: 4530
+    paid_by: upi
+  wants: cancel the order
+  personality: in_a_hurry
+  language: mostly_hindi
+  voice: male_young
+  number_style: hindi_pairs
+  tricks: [corrects_number_once]
+  opening_line: "Haan hello, mera order cancel karna hai"
 # The race happens "right after prepare", and plain mode has no prepare step.
 modes: [safe]
 timeline:

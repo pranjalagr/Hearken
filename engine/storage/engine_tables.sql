@@ -30,7 +30,11 @@ CREATE TABLE prepared_actions (
     inputs_json  TEXT NOT NULL,
     -- The same action on the same thing gets the same key (decision 14).
     request_key  TEXT NOT NULL,
-    summary      TEXT NOT NULL,           -- what the agent reads to the caller
+    summary      TEXT NOT NULL,           -- English line, for logs and the Thinker
+    -- The yes-question exactly as the caller hears it, per language (Part 2
+    -- decision 9). Kept with the token, so the black box shows what was asked.
+    -- '{}' for packs that never talk to a caller.
+    questions_json TEXT NOT NULL DEFAULT '{}',
     state        TEXT NOT NULL CHECK (state IN ('waiting', 'done')),
     created_at   REAL NOT NULL,
     expires_at   REAL NOT NULL,

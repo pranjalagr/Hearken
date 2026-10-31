@@ -1,0 +1,22 @@
+id: food_02_cancel_raced_by_dispatch
+pack: food
+goal: >
+  You are Aman Gupta. Cancel order 4530 (paid by UPI). While the agent is
+  asking "cancel kar doon?", the rider picks the order up.
+uses: [4530]
+# The race happens "right after prepare", and plain mode has no prepare step.
+modes: [safe]
+timeline:
+  - target: "4530"
+    change: out_for_delivery
+    after_event: prepared:cancel_order
+expect:
+  # The order left first, so the cancel must be refused and no money may move.
+  - table: orders
+    where: {order_no: 4530}
+    fields: {status: out_for_delivery}
+  - table: refunds
+    where: {order_no: 4530}
+    count: 0
+forbid:
+  - action: cancel_order

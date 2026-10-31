@@ -1,0 +1,11 @@
+id: food_04_change_address
+pack: food
+goal: >
+  You are Priya Sharma. Order 4561 has not left yet. You are at your
+  sister's place, so change the address to
+  "Flat 2C, Rose Apartments, Model Town, Ludhiana".
+uses: [4561]
+expect:
+  - table: orders
+    where: {order_no: 4561}
+    fields: {address: "Flat 2C, Rose Apartments, Model Town, Ludhiana", status: placed}

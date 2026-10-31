@@ -7,6 +7,7 @@ from pathlib import Path
 
 from engine.contract.action import Action, Check
 from engine.contract.pack import Pack
+from engine.contract.spoken import SpokenWords
 from engine.storage.database import Tx
 from packs.food import order_store as store
 from packs.food import rules
@@ -23,6 +24,9 @@ class FoodPack(Pack):
 
     def schema_sql(self) -> str:
         return (HERE / "schema.sql").read_text(encoding="utf-8")
+
+    def spoken_words(self) -> SpokenWords:
+        return SpokenWords.from_yaml(HERE / "spoken.yaml")
 
     async def load_seed(self, tx: Tx) -> None:
         seed = json.loads((HERE / "seed.json").read_text(encoding="utf-8"))

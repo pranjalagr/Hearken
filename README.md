@@ -47,7 +47,8 @@ engine/                 knows nothing about any business
   service/              backend (front desk), tool catalog, replies, MCP server
   tasks/                task files: load, set up a call, check the result
 packs/
-  food/                 the food-delivery pack: tables, seed, rules, actions, tasks
+  food/                 the food-delivery pack: tables, seed, rules, actions, tasks,
+                        and spoken.yaml (ready phrases the robot says out loud)
   toy/                  a tiny pack used only to prove the engine works without food
   registry.py           the only place that lists every pack
 cli/                    command-line entry points (wires engine + packs together)

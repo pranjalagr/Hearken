@@ -4,6 +4,9 @@
 
 Prints: time to make a call copy, tool call time (median and p90), and the
 size of the tool list the AI reads on every turn.
+
+The normal tool delays are switched off here: this measures the backend's own
+speed, not the realistic wait that is added on purpose (Part 2 decision 6).
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from engine.lab_controls.clock import WallClock
+from engine.lab_controls.normal_delays import NO_DELAYS
 from engine.service.backend import Backend
 from engine.service.tool_catalog import build_catalog
 from engine.storage.call_factory import CallFactory
@@ -42,7 +46,7 @@ async def main() -> None:
         copy_ms = []
         for n in range(COPIES):
             start = time.perf_counter()
-            path = await factory.new_call(CallSettings(call_id=f"m{n}", pack=pack.name))
+            path = await factory.new_call(CallSettings(call_id=f"m{n}", pack=pack.name, delays=NO_DELAYS))
             copy_ms.append((time.perf_counter() - start) * 1000)
 
         tool_ms = []

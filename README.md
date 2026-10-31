@@ -59,7 +59,14 @@ tests/
 
 ## How one tool call works
 
-Every tool call is one write transaction:
+Every tool call first waits its **normal delay**: 0.3 s for lookups and
+prepares, 0.8 s for a risky action's save, plus any slow-before-save switch.
+The backend itself answers in milliseconds, which no real company does. The
+wait happens outside the transaction, so a "ruko" can still cancel the ticket
+meanwhile. The values are saved in `call_info`, and `measure_backend` turns
+them off to measure raw speed.
+
+Then it is one write transaction:
 **move the world (timeline) → check → act → write the log → commit**.
 
 In safe mode a risky action takes two steps:

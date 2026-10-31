@@ -3,6 +3,9 @@
 `open_call` gives a test a fresh call copy, wired up exactly like production
 except for time: tests use a ManualClock, so time only moves when the test
 moves it, and every run sees the same times.
+
+The normal tool delays are off unless a test asks for them, so tests that
+check exact pretend times measure only what they mean to.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import pytest
 
 from engine.contract.pack import Pack
 from engine.lab_controls.clock import ManualClock
+from engine.lab_controls.normal_delays import NO_DELAYS, NormalDelays
 from engine.lab_controls.switches import Switch, Switchboard
 from engine.lab_controls.timeline import PlannedChange, Timeline
 from engine.safety.guard_door import GuardDoor
@@ -68,15 +72,16 @@ async def open_call(tmp_path: Path):
         task: Task | None = None,
         real_sleep: bool = False,
         lifetimes: Lifetimes = Lifetimes(),
+        delays: NormalDelays = NO_DELAYS,
     ) -> CallKit:
         if ticket_check is None:
             ticket_check = mode == "safe"
         factory = factories.setdefault(pack.name, CallFactory(pack, tmp_path))
         call_id = f"call-{next(numbers)}"
         if task is not None:
-            path = await start_call(factory, pack, task, call_id, mode, ticket_check)
+            path = await start_call(factory, pack, task, call_id, mode, ticket_check, delays)
         else:
-            path = await factory.new_call(CallSettings(call_id, pack.name, mode, ticket_check))
+            path = await factory.new_call(CallSettings(call_id, pack.name, mode, ticket_check, delays=delays))
         db = await SqliteDatabase.open(path)
         guard_db = await SqliteDatabase.open(path)
         opened.extend([db, guard_db])

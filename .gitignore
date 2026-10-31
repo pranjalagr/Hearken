@@ -13,3 +13,12 @@ runs/
 # Local settings stay off git (anything secret, or a real number if one is ever needed).
 .env
 *.local.*
+
+# Sound files are made again from text by a script (Part 3, C18), and real
+# voices from friends must never reach git (C16, plan risk 9).
+lab/sounds/
+*.wav
+*.flac
+
+# Node writes these if anyone ever installs packages for the web phone.
+node_modules/

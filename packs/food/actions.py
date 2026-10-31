@@ -1,15 +1,25 @@
 """The five food-delivery actions, each filling in the engine's Action shape.
 
-Each action only says WHAT is allowed (check), WHAT to read to the caller
-(summarize) and WHAT changes (do). WHEN and HOW SAFELY it runs (tokens,
-tickets, the transaction, the log) is the engine's job.
+Each action only says WHAT is allowed (check), WHAT to tell the caller
+(summarize for logs, spoken_question for the caller's ear) and WHAT changes
+(do). WHEN and HOW SAFELY it runs (tokens, tickets, the transaction, the log)
+is the engine's job.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from engine.contract.action import INTEGER, NUMBER, STRING, Action, ActionContext, Check, Input
+from engine.contract.action import (
+    INTEGER,
+    NUMBER,
+    STRING,
+    Action,
+    ActionContext,
+    Check,
+    Input,
+    SpokenQuestion,
+)
 from engine.storage.database import Tx
 from packs.food import order_store as store
 from packs.food import rules
@@ -27,6 +37,16 @@ async def identify(tx: Tx, inputs: dict[str, Any]) -> tuple[store.Order | None, 
     if not rules.name_matches(order.customer_name, inputs["customer_name"]):
         return None, Check.refuse(f"The name does not match order {order.order_no}. Ask for the name on the order.")
     return order, Check.ok()
+
+
+async def _cancel_refund(tx: Tx, inputs: dict[str, Any]) -> tuple[store.Order, int]:
+    """The order and how much cancelling it sends back, in paise.
+
+    One place for this sum, because three things must agree on it: the log
+    summary, the yes-question the caller hears, and the refund actually made.
+    """
+    order = await store.load_order(tx, inputs["order_no"])
+    return order, rules.refundable_left(order, await store.refunded_so_far(tx, order.order_no))
 
 
 class FindOrder(Action):
@@ -74,6 +94,14 @@ class ChangeAddress(Action):
     async def summarize(self, tx: Tx, inputs: dict[str, Any]) -> str:
         return f"change the delivery address of order {inputs['order_no']} to: {inputs['new_address']}"
 
+    async def spoken_question(self, tx: Tx, inputs: dict[str, Any]) -> SpokenQuestion:
+        # The new address is read back exactly as the caller gave it, so a
+        # misheard street name gets caught before anything changes.
+        return SpokenQuestion(
+            "change_address",
+            values={"order_no": str(inputs["order_no"]), "new_address": inputs["new_address"]},
+        )
+
     async def do(self, tx: Tx, inputs: dict[str, Any], ctx: ActionContext) -> dict[str, Any]:
         await store.set_address(tx, inputs["order_no"], inputs["new_address"])
         return {"order_no": inputs["order_no"], "address": inputs["new_address"]}
@@ -93,15 +121,25 @@ class CancelOrder(Action):
         return rules.can_cancel(order)
 
     async def summarize(self, tx: Tx, inputs: dict[str, Any]) -> str:
-        order = await store.load_order(tx, inputs["order_no"])
-        refund = rules.refundable_left(order, await store.refunded_so_far(tx, order.order_no))
+        order, refund = await _cancel_refund(tx, inputs)
         if refund > 0:
             return f"cancel order {order.order_no} and refund {format_rupees(refund)} to {order.payment_method}"
         return f"cancel order {order.order_no} (cash on delivery, so nothing to refund)"
 
+    async def spoken_question(self, tx: Tx, inputs: dict[str, Any]) -> SpokenQuestion:
+        # The same numbers as the summary, from the same helper, so the line
+        # the caller hears and the line in the log can never disagree.
+        order, refund = await _cancel_refund(tx, inputs)
+        if refund > 0:
+            return SpokenQuestion(
+                "cancel_with_refund",
+                values={"order_no": str(order.order_no), "amount": format_rupees(refund)},
+                phrases={"payment": ("payment_method", order.payment_method)},
+            )
+        return SpokenQuestion("cancel_no_refund", values={"order_no": str(order.order_no)})
+
     async def do(self, tx: Tx, inputs: dict[str, Any], ctx: ActionContext) -> dict[str, Any]:
-        order = await store.load_order(tx, inputs["order_no"])
-        refund = rules.refundable_left(order, await store.refunded_so_far(tx, order.order_no))
+        order, refund = await _cancel_refund(tx, inputs)
         await store.set_status(tx, order.order_no, rules.CANCELLED)
         # Decision 3: one yes covers both the cancel and its refund.
         if refund > 0:
@@ -150,6 +188,22 @@ class RefundOrder(Action):
         amount = format_rupees(rupees_to_paise(inputs["amount_rupees"]))
         problem = inputs["reason"].replace("_", " ")
         return f"refund {amount} on order {order.order_no} to {order.payment_method} for a {problem}"
+
+    async def spoken_question(self, tx: Tx, inputs: dict[str, Any]) -> SpokenQuestion:
+        order = await store.load_order(tx, inputs["order_no"])
+        return SpokenQuestion(
+            "refund",
+            values={
+                "order_no": str(order.order_no),
+                "amount": format_rupees(rupees_to_paise(inputs["amount_rupees"])),
+            },
+            # The reason is said back too, so a refund asked for the wrong
+            # problem ("wrong item" vs "missing item") gets caught by the caller.
+            phrases={
+                "payment": ("payment_method", order.payment_method),
+                "reason": ("refund_reason", inputs["reason"]),
+            },
+        )
 
     async def do(self, tx: Tx, inputs: dict[str, Any], ctx: ActionContext) -> dict[str, Any]:
         order = await store.load_order(tx, inputs["order_no"])

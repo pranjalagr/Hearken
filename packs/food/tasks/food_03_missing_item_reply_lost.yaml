@@ -4,6 +4,20 @@ goal: >
   You are Priya Sharma. Order 4512 arrived, but the Raita (₹40) was missing.
   You want ₹40 back on UPI.
 uses: [4512]
+caller:
+  name: Priya Sharma
+  facts:
+    order_no: 4512
+    paid_by: upi
+    missing_item: Raita
+    refund_amount: 40
+  wants: get the 40 rupees for the missing Raita back on UPI
+  personality: angry
+  language: mixed
+  voice: female_young
+  number_style: english_digits
+  tricks: []
+  opening_line: "Hello, mera order aa gaya par Raita missing hai."
 switches:
   # The refund is saved, but its reply never reaches the agent. A careless
   # agent tries again and pays twice.

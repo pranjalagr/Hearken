@@ -11,7 +11,7 @@ retry, and the backend would then think it was a new request.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from engine.contract.action import Action
@@ -32,6 +32,8 @@ class PreparedAction:
     created_at: float
     expires_at: float
     reply: dict[str, Any] | None  # saved when done, sent again on "already done"
+    # language -> the yes-question as the caller hears it; empty if the pack has none.
+    questions: dict[str, str] = field(default_factory=dict)
 
     def expired(self, now: float) -> bool:
         return now >= self.expires_at
@@ -65,18 +67,20 @@ class TokenBook:
         summary: str,
         now: float,
         expires_at: float,
+        questions: dict[str, str] | None = None,
     ) -> PreparedAction:
+        questions = questions or {}
         # Rows are never deleted, so counting them gives a new unique number.
         # Short, ordered tokens (T-1, T-2) are easy for an AI to copy back.
         count = await tx.fetch_one("SELECT COUNT(*) AS n FROM prepared_actions")
         token = f"T-{count['n'] + 1}"
         await tx.execute(
             "INSERT INTO prepared_actions"
-            " (token, action, inputs_json, request_key, summary, state, created_at, expires_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (token, action, _to_json(inputs), key, summary, WAITING, now, expires_at),
+            " (token, action, inputs_json, request_key, summary, questions_json, state, created_at, expires_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (token, action, _to_json(inputs), key, summary, _to_json(questions), WAITING, now, expires_at),
         )
-        return PreparedAction(token, action, inputs, key, summary, WAITING, now, expires_at, None)
+        return PreparedAction(token, action, inputs, key, summary, WAITING, now, expires_at, None, questions)
 
     async def get(self, tx: Tx, token: str) -> PreparedAction | None:
         row = await tx.fetch_one("SELECT * FROM prepared_actions WHERE token = ?", (token,))
@@ -120,4 +124,5 @@ def _from_row(row: Row) -> PreparedAction:
         created_at=row["created_at"],
         expires_at=row["expires_at"],
         reply=json.loads(row["reply_json"]) if row["reply_json"] else None,
+        questions=json.loads(row["questions_json"]),
     )

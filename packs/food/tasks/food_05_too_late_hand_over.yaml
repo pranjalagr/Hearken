@@ -4,6 +4,18 @@ goal: >
   You are Vikram Rao. You want to cancel order 4540, but it is already out for
   delivery. When you hear that, you insist on talking to a person.
 uses: [4540]
+caller:
+  name: Vikram Rao
+  facts:
+    order_no: 4540
+    paid_by: card
+  wants: cancel order 4540; if it can't be cancelled, insist on talking to a person
+  personality: elderly
+  language: mostly_hindi
+  voice: male_older
+  number_style: hindi_pairs
+  tricks: []
+  opening_line: "Haan ji, mera order cancel karwana hai."
 expect:
   - table: orders
     where: {order_no: 4540}

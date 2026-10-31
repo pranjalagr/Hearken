@@ -1,0 +1,6 @@
+{
+  "name": "hearken-web-phone",
+  "private": true,
+  "type": "module",
+  "description": "Lets Node load phone-dsp.js as an ES module, the same way the browser does, so its tests run the exact file the page uses."
+}

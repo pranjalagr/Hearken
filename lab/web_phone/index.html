@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hearken web phone</title>
+  <style>
+    :root { color-scheme: light dark; --gap: 12px; }
+    body { font: 16px/1.5 system-ui, sans-serif; max-width: 420px; margin: 24px auto; padding: 0 16px; }
+    h1 { font-size: 1.4rem; margin-bottom: 4px; }
+    p.hint { margin-top: 0; opacity: 0.75; font-size: 0.9rem; }
+    label { display: block; font-weight: 600; margin: var(--gap) 0 4px; }
+    input { width: 100%; box-sizing: border-box; padding: 8px; font: inherit; }
+    .row { display: flex; gap: var(--gap); margin-top: var(--gap); }
+    .row button { flex: 1; }
+    button { padding: 10px; font: inherit; border-radius: 8px; border: 1px solid #8888; cursor: pointer; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    #call { background: #1b7f3b; color: white; }
+    #hang-up { background: #b3261e; color: white; }
+    .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: var(--gap); }
+    .keypad button { font-size: 1.3rem; }
+    #status { margin-top: var(--gap); padding: 8px; border-radius: 8px; background: #8881; min-height: 1.5em; }
+  </style>
+</head>
+<body>
+  <h1>Hearken web phone</h1>
+  <p class="hint">Calls a robot over the wire: your voice at 8 kHz, like a real phone line.
+    Use Chrome or Edge, and allow the microphone when asked.</p>
+
+  <label for="robot-url">Robot address</label>
+  <input id="robot-url" value="ws://127.0.0.1:8765/call" spellcheck="false" autocomplete="off">
+
+  <div class="row">
+    <button id="call" type="button">Call</button>
+    <button id="hang-up" type="button">Hang up</button>
+  </div>
+
+  <div class="keypad" role="group" aria-label="Keypad">
+    <button type="button" data-key="1">1</button><button type="button" data-key="2">2</button><button type="button" data-key="3">3</button>
+    <button type="button" data-key="4">4</button><button type="button" data-key="5">5</button><button type="button" data-key="6">6</button>
+    <button type="button" data-key="7">7</button><button type="button" data-key="8">8</button><button type="button" data-key="9">9</button>
+    <button type="button" data-key="*">*</button><button type="button" data-key="0">0</button><button type="button" data-key="#">#</button>
+  </div>
+
+  <div class="row">
+    <button id="go-silent" type="button" title="The line goes dead without a goodbye, to test the robot's 30-second rule">Silent drop (test)</button>
+  </div>
+
+  <div id="status" role="status" aria-live="polite">Ready.</div>
+
+  <script type="module" src="phone.js"></script>
+</body>
+</html>

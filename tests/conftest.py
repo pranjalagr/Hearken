@@ -11,7 +11,11 @@ check exact pretend times measure only what they mean to.
 from __future__ import annotations
 
 import asyncio
+import gc
 import itertools
+import sys
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,6 +23,7 @@ from typing import Any
 import pytest
 
 from engine.contract.pack import Pack
+from engine.lab_controls.bells import NO_BELLS, BellLine
 from engine.lab_controls.clock import ManualClock
 from engine.lab_controls.normal_delays import NO_DELAYS, NormalDelays
 from engine.lab_controls.switches import Switch, Switchboard
@@ -73,6 +78,7 @@ async def open_call(tmp_path: Path):
         real_sleep: bool = False,
         lifetimes: Lifetimes = Lifetimes(),
         delays: NormalDelays = NO_DELAYS,
+        bells: BellLine = NO_BELLS,
     ) -> CallKit:
         if ticket_check is None:
             ticket_check = mode == "safe"
@@ -100,10 +106,138 @@ async def open_call(tmp_path: Path):
 
         settings = await read_call_settings(db)
         backend = Backend(
-            db, pack, clock, settings, lifetimes, sleep=asyncio.sleep if real_sleep else pretend_sleep
+            db, pack, clock, settings, lifetimes, sleep=asyncio.sleep if real_sleep else pretend_sleep, bells=bells
         )
         return CallKit(path, clock, settings, backend, GuardDoor(guard_db, clock, lifetimes), db)
 
     yield _open
     for db in opened:
         await db.close()
+
+
+FREEZE_LIMIT_S = 0.1  # decision 14
+_HEARTBEAT_S = 0.01
+
+
+def _in_event_loop_plumbing(frame) -> bool:
+    """True if the main thread is inside the event loop's own machinery:
+    waiting for events, or in the OS socket calls asyncio makes for itself
+    (measured here: once a single WSARecv on asyncio's wake-up socket took
+    over 100 ms, in a test that opened no sockets at all).
+
+    A late heartbeat while there means the operating system was slow, not our
+    code. A late heartbeat while our code, or a library it called, is running
+    is a freeze we caused. Socket and selector frames are looked through to
+    see who called them, so a blocking socket call in our own code still counts.
+    """
+    while frame is not None:
+        path = frame.f_code.co_filename.replace("\\", "/")
+        if "/asyncio/" in path:
+            return True
+        if not path.endswith(("/socket.py", "/selectors.py")):
+            return False
+        frame = frame.f_back
+    return False
+
+
+class FreezeWatch:
+    """Finds the moments our code blocks the event loop for over 100 ms.
+
+    Part 2 decision 14: every wait must be async. One blocking call would
+    freeze every call sharing the worker. How it is measured:
+    - a heartbeat task ticks every 10 ms on the event loop;
+    - a watcher thread checks it every 5 ms; when the heartbeat is over
+      100 ms late, it looks at what the main thread is doing. Waiting for
+      events: the OS woke the process late, not a freeze of ours. Running
+      code: a freeze, recorded with exactly which code was running.
+
+    Not asyncio's debug mode: it records a stack trace for every small step,
+    and under bursts of audio messages that bookkeeping alone took over
+    100 ms, so it raised false alarms and slowed the code it was measuring.
+
+    Garbage collection: after hundreds of tests the process holds ~165,000
+    objects, and one full collection was measured at 50 ms, enough to push
+    a heartbeat past 100 ms. So, as a low-delay service does after start-up,
+    the watch parks every existing object first (gc.freeze): collections
+    during the test then only scan what the call itself made.
+    """
+
+    def __init__(self) -> None:
+        self.freezes: list[str] = []
+        self._main_thread = threading.get_ident()
+        self._last_beat = time.perf_counter()
+        self._stop = threading.Event()
+        self._beat_task: asyncio.Task | None = None
+        self._watcher = threading.Thread(target=self._watch, name="freeze-watcher", daemon=True)
+
+    def start(self) -> None:
+        gc.collect()  # before the heartbeat starts, so its own time is never counted
+        gc.freeze()
+        self._beat_task = asyncio.create_task(self._heartbeat())
+        self._watcher.start()
+
+    async def stop(self) -> list[str]:
+        self._stop.set()
+        self._watcher.join()
+        self._beat_task.cancel()
+        await asyncio.gather(self._beat_task, return_exceptions=True)
+        gc.unfreeze()
+        return self.freezes
+
+    async def _heartbeat(self) -> None:
+        while True:
+            self._last_beat = time.perf_counter()
+            await asyncio.sleep(_HEARTBEAT_S)
+
+    def _watch(self) -> None:
+        # Every 5 ms while the heartbeat is clearly late, note what the main
+        # thread runs; once it is over 100 ms late, judge the whole late
+        # stretch: any sample in our code means we caused it.
+        #
+        # Sampling starts at 50 ms late, not earlier: on Windows a 10 ms sleep
+        # often wakes after 16 or 31 ms (the 15.6 ms system timer), which is
+        # normal. And a sample only copies file/line/name: formatting a stack
+        # reads source files from disk while holding Python's lock, which would
+        # make the main thread wait for the watcher, adding the very stall it
+        # measures. The readable stack is built after the test.
+        current_beat, ours, reported_beat = None, [], None
+        while not self._stop.wait(0.005):
+            beat = self._last_beat
+            if beat != current_beat:
+                current_beat, ours = beat, []
+            late = time.perf_counter() - beat - _HEARTBEAT_S
+            if late <= 0.05:
+                continue
+            frame = sys._current_frames().get(self._main_thread)
+            if frame is not None and not _in_event_loop_plumbing(frame):
+                ours.append(_where(frame))
+            if late > FREEZE_LIMIT_S and beat != reported_beat:
+                reported_beat = beat  # one judgement per freeze
+                if ours:
+                    self.freezes.append(f"blocked over {FREEZE_LIMIT_S * 1000:.0f} ms in:\n" + "\n".join(ours[0]))
+
+
+def _where(frame, depth: int = 6) -> list[str]:
+    """The innermost frames as "file:line in function", without touching the
+    disk (no source lines), so it is quick enough to run during a stall."""
+    lines = []
+    while frame is not None and len(lines) < depth:
+        lines.append(f"  {frame.f_code.co_filename}:{frame.f_lineno} in {frame.f_code.co_name}")
+        frame = frame.f_back
+    return lines
+
+
+@pytest.fixture
+def make_freeze_watch():
+    """For testing the freeze check itself."""
+    return FreezeWatch
+
+
+@pytest.fixture
+async def no_freezes():
+    """Fail the test if our code ever blocks the event loop for over 100 ms."""
+    watch = FreezeWatch()
+    watch.start()
+    yield
+    freezes = await watch.stop()
+    assert not freezes, "the event loop froze:\n" + "\n".join(freezes)

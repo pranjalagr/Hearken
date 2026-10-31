@@ -7,7 +7,7 @@ directly. That is what lets a new pack plug in with zero engine changes.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from engine.storage.database import Tx
@@ -55,6 +55,22 @@ class ActionContext:
     token: str | None  # the token being confirmed; None in plain mode
 
 
+@dataclass(frozen=True)
+class SpokenQuestion:
+    """The yes-question before it is put into words (Part 2 decision 9).
+
+    The action picks the line and hands over the backend's own numbers; the
+    words come from the pack's spoken words file. So no AI ever writes the
+    question, and the amount can never be left out.
+    """
+
+    line: str  # a key in the pack's `yes_question` group
+    # Said exactly as given: order number, amount, address.
+    values: dict[str, str] = field(default_factory=dict)
+    # name -> (group, value): said as that group's phrase, in the caller's language.
+    phrases: dict[str, tuple[str, str]] = field(default_factory=dict)
+
+
 class Action(ABC):
     """Base class for every business action ("cancel order", "pay bill", ...)."""
 
@@ -74,6 +90,15 @@ class Action(ABC):
     async def summarize(self, tx: Tx, inputs: dict[str, Any]) -> str:
         """The line read to the caller before asking for a yes. Risky actions only."""
         raise NotImplementedError(f"risky action {self.name} must define summarize()")
+
+    async def spoken_question(self, tx: Tx, inputs: dict[str, Any]) -> SpokenQuestion | None:
+        """The yes-question for a risky action, at prepare time.
+
+        `summarize` stays: it is the English line for logs and the Thinker.
+        This one is what the caller hears. None for packs that never talk to
+        a caller, like the toy pack.
+        """
+        return None
 
     @abstractmethod
     async def do(self, tx: Tx, inputs: dict[str, Any], ctx: ActionContext) -> dict[str, Any]:

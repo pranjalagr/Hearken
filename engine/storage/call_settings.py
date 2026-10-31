@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
+from engine.lab_controls.normal_delays import NormalDelays
 from engine.storage.database import Database, Tx
 
 PLAIN = "plain"
@@ -20,6 +21,9 @@ class CallSettings:
     task_id: str | None = None
     # Real-world start time, only used by the live clock.
     started_at_wall: float = field(default_factory=time.time)
+    # Kept with the call, not only in code, so the black box shows which waits
+    # a run used (Part 2 decision 33: every number traces back to its settings).
+    delays: NormalDelays = NormalDelays()
 
     def __post_init__(self) -> None:
         if self.mode not in (PLAIN, SAFE):
@@ -31,8 +35,9 @@ class CallSettings:
 
 async def write_call_settings(tx: Tx, settings: CallSettings) -> None:
     await tx.execute(
-        "INSERT INTO call_info (id, call_id, task_id, pack, mode, ticket_check, started_at_wall)"
-        " VALUES (1, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO call_info (id, call_id, task_id, pack, mode, ticket_check, started_at_wall,"
+        " lookup_delay_s, change_delay_s)"
+        " VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             settings.call_id,
             settings.task_id,
@@ -40,6 +45,8 @@ async def write_call_settings(tx: Tx, settings: CallSettings) -> None:
             settings.mode,
             int(settings.ticket_check),
             settings.started_at_wall,
+            settings.delays.lookup_s,
+            settings.delays.change_s,
         ),
     )
 
@@ -56,4 +63,5 @@ async def read_call_settings(db: Database) -> CallSettings:
         ticket_check=bool(row["ticket_check"]),
         task_id=row["task_id"],
         started_at_wall=row["started_at_wall"],
+        delays=NormalDelays(lookup_s=row["lookup_delay_s"], change_s=row["change_delay_s"]),
     )

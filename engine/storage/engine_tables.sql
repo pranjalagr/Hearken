@@ -15,6 +15,10 @@ CREATE TABLE call_info (
     -- Real-world start time. Only the live clock uses it, so that every
     -- process working on this call agrees on "now".
     started_at_wall REAL NOT NULL,
+    -- Part 2 decision 6: the normal wait per tool call, in seconds (0 = off).
+    -- No default here: the values live in NormalDelays, in one place only.
+    lookup_delay_s  REAL NOT NULL CHECK (lookup_delay_s >= 0),
+    change_delay_s  REAL NOT NULL CHECK (change_delay_s >= 0),
     -- Decision 8: plain mode has no confirm step, so there is nothing to check a ticket at.
     CHECK (NOT (mode = 'plain' AND ticket_check = 1))
 ) STRICT;

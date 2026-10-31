@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from engine.contract.pack import Pack
+from engine.lab_controls.normal_delays import NormalDelays
 from engine.lab_controls.switches import Switchboard
 from engine.lab_controls.timeline import Timeline
 from engine.storage.call_factory import CallFactory
@@ -21,13 +22,14 @@ async def start_call(
     call_id: str,
     mode: str,
     ticket_check: bool,
+    delays: NormalDelays = NormalDelays(),
 ) -> Path:
     if task.pack != pack.name:
         raise ValueError(f"task {task.id} is for pack {task.pack!r}, not {pack.name!r}")
     if mode not in task.modes:
         raise ValueError(f"task {task.id} is not meant for {mode} mode")
     settings = CallSettings(
-        call_id=call_id, pack=pack.name, mode=mode, ticket_check=ticket_check, task_id=task.id
+        call_id=call_id, pack=pack.name, mode=mode, ticket_check=ticket_check, task_id=task.id, delays=delays
     )
     path = await factory.new_call(settings)
     switches, timeline = Switchboard(), Timeline(pack)

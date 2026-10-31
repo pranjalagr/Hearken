@@ -1,7 +1,8 @@
 """The backend: the front desk of one call, and the only way an agent can
 change the shop.
 
-Every tool call is one write transaction, in this order:
+Every tool call first waits its normal delay (Part 2 decision 6), outside any
+transaction, and is then one write transaction, in this order:
     move the world forward (timeline) -> check -> act -> write the log -> commit
 A refused call still commits, because its log row and the timeline moves must
 be kept. A crash rolls everything back, so a half-done action can never exist.
@@ -90,9 +91,7 @@ class Backend:
         if problem:
             return await self._refuse_alone(tool, raw, problem, action=action.name)
         switch = await self._peek_switch(action.name)
-        if switch and switch.waits_before_save:
-            # Waits before the transaction starts, so it holds no lock (decision 9).
-            await self._sleep(switch.seconds)
+        await self._wait_before_work(self._settings.delays.for_action(action.risky), switch)
         async with self._db.transaction() as tx:
             now = self._clock.now()
             await self._timeline.apply_due(tx, now)  # the world moves first
@@ -117,6 +116,9 @@ class Backend:
         if problem:
             return await self._refuse_alone(tool, raw, problem, action=action.name)
         key = request_key(action, inputs)
+        # A prepare only checks and writes a token, nothing changes yet, so it
+        # takes the lookup time even for a risky action.
+        await self._wait_before_work(self._settings.delays.lookup_s)
         async with self._db.transaction() as tx:
             now = self._clock.now()
             await self._timeline.apply_due(tx, now)
@@ -161,8 +163,7 @@ class Backend:
         async with self._db.transaction(write=False) as tx:
             peeked = await self._tokens.get(tx, token_id)
             switch = await self._switches.peek(tx, peeked.action) if peeked else None
-        if switch and switch.waits_before_save:
-            await self._sleep(switch.seconds)  # outside the transaction (decision 9)
+        await self._wait_before_work(self._settings.delays.change_s, switch)
 
         async with self._db.transaction() as tx:
             now = self._clock.now()
@@ -220,6 +221,22 @@ class Backend:
     async def _peek_switch(self, action: str) -> Switch | None:
         async with self._db.transaction(write=False) as tx:
             return await self._switches.peek(tx, action)
+
+    async def _wait_before_work(self, normal_s: float, switch: Switch | None = None) -> None:
+        """The tool's normal delay, plus a slow-before-save switch on top.
+
+        Always before the transaction starts: waiting inside it would hold the
+        write lock, and the Guard could not cancel a ticket on "ruko" until the
+        action was already saved (Part 1 decision 9).
+
+        Calls that a bad input or an unknown tool name stops at the door never
+        get here: no work was done, so there is nothing to wait for.
+        """
+        seconds = normal_s + (switch.seconds if switch and switch.waits_before_save else 0.0)
+        # No zero-second sleep: even sleep(0) hands control to other tasks, and
+        # with the delays off the order of events must stay exactly as before.
+        if seconds > 0:
+            await self._sleep(seconds)
 
     async def _refuse(self, tx: Tx, draft: LogEntry, reason: str) -> ToolReply:
         """Refuse inside an open transaction. Only the log row (and any timeline

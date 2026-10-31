@@ -1,0 +1,53 @@
+{
+  "_note": "Fake data only. Order amounts are not stored here: they are worked out from the items, so they can never disagree.",
+  "customers": [
+    {"customer_id": 1, "name": "Rahul Verma"},
+    {"customer_id": 2, "name": "Priya Sharma"},
+    {"customer_id": 3, "name": "Aman Gupta"},
+    {"customer_id": 4, "name": "Neha Singh"},
+    {"customer_id": 5, "name": "Vikram Rao"},
+    {"customer_id": 6, "name": "Sana Khan"}
+  ],
+  "orders": [
+    {"order_no": 4521, "customer_id": 1, "payment_method": "card", "status": "preparing",
+     "address": "Flat 12B, Shanti Apartments, Sector 21, Noida",
+     "items": [{"item": "Paneer Butter Masala", "quantity": 1, "price_paise": 28000},
+               {"item": "Butter Naan", "quantity": 2, "price_paise": 8500}]},
+    {"order_no": 4512, "customer_id": 2, "payment_method": "upi", "status": "delivered",
+     "address": "House 7, Lane 3, Model Town, Ludhiana",
+     "items": [{"item": "Veg Biryani", "quantity": 1, "price_paise": 22000},
+               {"item": "Raita", "quantity": 1, "price_paise": 4000},
+               {"item": "Gulab Jamun", "quantity": 2, "price_paise": 6000}]},
+    {"order_no": 4530, "customer_id": 3, "payment_method": "upi", "status": "placed",
+     "address": "Flat 3A, Green Park Residency, Indore",
+     "items": [{"item": "Masala Dosa", "quantity": 2, "price_paise": 12000}]},
+    {"order_no": 4533, "customer_id": 4, "payment_method": "cash", "status": "preparing",
+     "address": "Shop 4, Main Market, Lajpat Nagar, Delhi",
+     "items": [{"item": "Chole Bhature", "quantity": 1, "price_paise": 18000},
+               {"item": "Sweet Lassi", "quantity": 1, "price_paise": 7000}]},
+    {"order_no": 4540, "customer_id": 5, "payment_method": "card", "status": "out_for_delivery",
+     "address": "Flat 901, Lake View Towers, Pune",
+     "items": [{"item": "Chicken Biryani", "quantity": 1, "price_paise": 32000},
+               {"item": "Cold Drink", "quantity": 1, "price_paise": 4000}]},
+    {"order_no": 4547, "customer_id": 6, "payment_method": "upi", "status": "delivered",
+     "address": "House 22, Sector 5, Salt Lake, Kolkata",
+     "items": [{"item": "Veg Thali", "quantity": 2, "price_paise": 25000}]},
+    {"order_no": 4555, "customer_id": 1, "payment_method": "upi", "status": "delivered",
+     "address": "Flat 12B, Shanti Apartments, Sector 21, Noida",
+     "items": [{"item": "Margherita Pizza", "quantity": 1, "price_paise": 39900}]},
+    {"order_no": 4561, "customer_id": 2, "payment_method": "card", "status": "placed",
+     "address": "House 7, Lane 3, Model Town, Ludhiana",
+     "items": [{"item": "Club Sandwich", "quantity": 1, "price_paise": 12500},
+               {"item": "Cold Coffee", "quantity": 1, "price_paise": 12450}]},
+    {"order_no": 4568, "customer_id": 3, "payment_method": "card", "status": "delivered",
+     "address": "Flat 3A, Green Park Residency, Indore",
+     "items": [{"item": "Veg Momos", "quantity": 2, "price_paise": 9000}]},
+    {"order_no": 4572, "customer_id": 4, "payment_method": "upi", "status": "cancelled",
+     "address": "Shop 4, Main Market, Lajpat Nagar, Delhi",
+     "items": [{"item": "Aloo Paratha", "quantity": 3, "price_paise": 5000}]}
+  ],
+  "refunds": [
+    {"order_no": 4547, "amount_paise": 10000, "method": "upi", "reason": "missing_item", "at": -86400},
+    {"order_no": 4572, "amount_paise": 15000, "method": "upi", "reason": "order cancelled", "at": -3600}
+  ]
+}

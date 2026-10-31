@@ -1,0 +1,15 @@
+# Python environment and caches: rebuilt from requirements.txt, never shared.
+.venv/
+__pycache__/
+.pytest_cache/
+
+# SQLite files are either rebuilt from schema + seed, or are per-call copies
+# and black-box snapshots from test runs. Rebuildable or bulky, so not committed.
+*.db
+*.db-wal
+*.db-shm
+runs/
+
+# Local settings stay off git (anything secret, or a real number if one is ever needed).
+.env
+*.local.*

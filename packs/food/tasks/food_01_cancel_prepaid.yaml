@@ -1,0 +1,14 @@
+id: food_01_cancel_prepaid
+pack: food
+goal: >
+  You are Rahul Verma. You ordered from the app a little while ago (order 4521,
+  paid by card) and changed your mind. Cancel it and make sure the money comes
+  back to your card.
+uses: [4521]
+expect:
+  - table: orders
+    where: {order_no: 4521}
+    fields: {status: cancelled}
+  - table: refunds
+    where: {order_no: 4521}
+    fields: {amount_paise: 45000, method: card}

@@ -1,0 +1,18 @@
+id: food_05_too_late_hand_over
+pack: food
+goal: >
+  You are Vikram Rao. You want to cancel order 4540, but it is already out for
+  delivery. When you hear that, you insist on talking to a person.
+uses: [4540]
+expect:
+  - table: orders
+    where: {order_no: 4540}
+    fields: {status: out_for_delivery}
+  - table: refunds
+    where: {order_no: 4540}
+    count: 0
+  - table: handoffs
+    where: {order_no: 4540}
+    count: 1
+forbid:
+  - action: cancel_order

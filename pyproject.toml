@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Lets tests import engine/ and packs/ straight from the project folder,
+# without installing the project as a package first.
+pythonpath = ["."]
+# The backend is async (aiosqlite), so most tests are async too.
+# "auto" runs every async test without marking each one by hand.
+asyncio_mode = "auto"
+# A fresh event loop per test, so one test can never leak state into another
+# (same idea as one private database copy per call).
+asyncio_default_fixture_loop_scope = "function"

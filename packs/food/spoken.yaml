@@ -1,0 +1,26 @@
+# What the robot says out loud for the food pack's fixed values.
+#
+# Part 2 decision 8: the Talker never translates a raw value like
+# "out_for_delivery" itself; it says the ready phrase from here.
+# Part 2 decision 12: English letters only, and a Hinglish and an English
+# version of each, so the robot can follow the caller's language.
+#
+# Change wording here, never in code. Every status in rules.py must have a
+# phrase (a test checks it).
+
+status:
+  placed:
+    hinglish: "Aapka order mil gaya hai, restaurant ne abhi banana shuru nahi kiya."
+    english: "Your order has been received; the restaurant hasn't started preparing it yet."
+  preparing:
+    hinglish: "Kitchen mein aapka khana ban raha hai."
+    english: "Your food is being prepared in the kitchen."
+  out_for_delivery:
+    hinglish: "Aapka order rider ke saath nikal chuka hai, raste mein hai."
+    english: "Your order has left with the rider and is on the way."
+  delivered:
+    hinglish: "Aapka order deliver ho chuka hai."
+    english: "Your order has been delivered."
+  cancelled:
+    hinglish: "Aapka order cancel ho chuka hai."
+    english: "Your order has been cancelled."

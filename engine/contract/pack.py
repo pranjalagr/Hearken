@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import ClassVar
 
 from engine.contract.action import Action, Check
+from engine.contract.spoken import SpokenWords
 from engine.storage.database import Tx
 
 
@@ -33,3 +34,11 @@ class Pack(ABC):
         Refuse it when the pack's rules forbid it, for example a cancelled order
         is never sent out for delivery. The engine then marks it skipped.
         """
+
+    def spoken_words(self) -> SpokenWords:
+        """Ready phrases for the pack's fixed values (statuses, reasons...).
+
+        Not abstract: a pack that never talks to a caller, like the toy pack,
+        has none, and asking it for a phrase fails loudly.
+        """
+        return SpokenWords()

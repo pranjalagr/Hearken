@@ -18,12 +18,13 @@ from engine.contract.action import (
     ActionContext,
     Check,
     Input,
+    Phrase,
     SpokenQuestion,
 )
 from engine.storage.database import Tx
 from packs.food import order_store as store
 from packs.food import rules
-from packs.food.money import format_rupees, rupees_to_paise
+from packs.food.money import format_rupees, rupees_to_paise, spoken_amount
 
 ORDER_NO = Input(INTEGER, "The 4-digit order number.")
 CUSTOMER_NAME = Input(STRING, "The name the caller gives; it must match the name on the order.")
@@ -133,8 +134,8 @@ class CancelOrder(Action):
         if refund > 0:
             return SpokenQuestion(
                 "cancel_with_refund",
-                values={"order_no": str(order.order_no), "amount": format_rupees(refund)},
-                phrases={"payment": ("payment_method", order.payment_method)},
+                values={"order_no": str(order.order_no)},
+                phrases={"amount": spoken_amount(refund), "payment": Phrase("payment_method", order.payment_method)},
             )
         return SpokenQuestion("cancel_no_refund", values={"order_no": str(order.order_no)})
 
@@ -193,15 +194,13 @@ class RefundOrder(Action):
         order = await store.load_order(tx, inputs["order_no"])
         return SpokenQuestion(
             "refund",
-            values={
-                "order_no": str(order.order_no),
-                "amount": format_rupees(rupees_to_paise(inputs["amount_rupees"])),
-            },
+            values={"order_no": str(order.order_no)},
             # The reason is said back too, so a refund asked for the wrong
             # problem ("wrong item" vs "missing item") gets caught by the caller.
             phrases={
-                "payment": ("payment_method", order.payment_method),
-                "reason": ("refund_reason", inputs["reason"]),
+                "amount": spoken_amount(rupees_to_paise(inputs["amount_rupees"])),
+                "payment": Phrase("payment_method", order.payment_method),
+                "reason": Phrase("refund_reason", inputs["reason"]),
             },
         )
 

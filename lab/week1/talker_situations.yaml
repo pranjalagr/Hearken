@@ -1,0 +1,167 @@
+# 20 moments a Talker must handle, for decision 2's Flash-Lite check.
+#
+# Kept different from the style examples in agents/agent_c/talker/prompts/style.md,
+# so the check measures the model's own Hinglish, not its copying.
+#
+# turns: the call so far, oldest first; the last turn is always the caller's.
+# notes: what the notebook says (decision 16), empty when nothing is known yet.
+# good:  what a good reply does, for whoever judges the replies.
+
+- id: 1
+  good: greets and offers help
+  turns:
+    - caller: "Haan ji, hello, koi hai?"
+  notes: []
+
+- id: 2
+  good: asks for the order number and the name on the order
+  turns:
+    - robot: "Namaste, Hearken Food se bol raha hoon. Bataiye, kya madad karoon?"
+    - caller: "Mujhe apna khana cancel karwana hai, galti se order ho gaya."
+  notes: []
+
+- id: 3
+  good: says sorry and asks for the order number and name, in English
+  turns:
+    - robot: "Namaste, Hearken Food se bol raha hoon. Bataiye, kya madad karoon?"
+    - caller: "Hey, my food hasn't arrived yet and it's been forty minutes."
+  notes: []
+
+- id: 4
+  good: says it is checking, without guessing anything
+  turns:
+    - robot: "Zaroor, order number aur naam bata dijiye."
+    - caller: "Order number hai 4530, naam Aman Gupta."
+  notes:
+    - "job: find order 4530 for Aman Gupta (checking, no answer yet)"
+
+- id: 5
+  good: says the status exactly as the note's ready sentence
+  turns:
+    - robot: "Ek second, check kar raha hoon."
+    - caller: "Toh kya hua mera order?"
+  notes:
+    - "found: order 4530"
+    - "status: Aapka order mil gaya hai, restaurant ne abhi banana shuru nahi kiya."
+
+- id: 6
+  good: says it doesn't have the exact time, without guessing one
+  turns:
+    - robot: "Aapka order rider ke saath nikal chuka hai, raste mein hai."
+    - caller: "Kitni der mein aa jayega?"
+  notes:
+    - "found: order 4540"
+    - "status: Aapka order rider ke saath nikal chuka hai, raste mein hai."
+
+- id: 7
+  good: says it can't share the rider's number, offers a team member
+  turns:
+    - robot: "Aapka order rider ke saath nikal chuka hai, raste mein hai."
+    - caller: "Delivery boy ka number de do, main khud baat kar leta hoon."
+  notes:
+    - "found: order 4540"
+    - "status: Aapka order rider ke saath nikal chuka hai, raste mein hai."
+
+- id: 8
+  good: stays calm, says sorry, keeps helping
+  turns:
+    - robot: "Ek second, check kar raha hoon."
+    - caller: "Yaar ye kya service hai, do baar call kar chuka hoon!"
+  notes:
+    - "job: find order 4521 for Rahul Verma (checking, no answer yet)"
+
+- id: 9
+  good: says sorry and asks for the order number and name, in English
+  turns:
+    - robot: "Namaste, Hearken Food se bol raha hoon. Bataiye, kya madad karoon?"
+    - caller: "The raita was missing in my order."
+  notes: []
+
+- id: 10
+  good: confirms the 40 rupees went back to UPI, without promising when it reaches the account
+  turns:
+    - robot: "Ho gaya, ₹40 aapke UPI par wapas bhej diye hain."
+    - caller: "Toh paise kab tak aa jayenge account mein?"
+  notes:
+    - "done: refund [amount] to UPI for order 4512 (missing Raita)"
+
+- id: 11
+  good: explains it can't be cancelled now, offers a team member
+  turns:
+    - robot: "Ek second, check kar raha hoon."
+    - caller: "Please cancel kar do na."
+  notes:
+    - "refused: order 4540 can't be cancelled, it is already out for delivery"
+    - "status: Aapka order rider ke saath nikal chuka hai, raste mein hai."
+
+- id: 12
+  good: says goodbye warmly
+  turns:
+    - robot: "Aapka address badal diya gaya hai."
+    - caller: "Bas itna hi tha, shukriya."
+  notes:
+    - "done: address of order 4561 changed"
+
+- id: 13
+  good: asks the caller to say it again
+  turns:
+    - robot: "Namaste, Hearken Food se bol raha hoon. Bataiye, kya madad karoon?"
+    - caller: "Haan wo... matlab... order ka... (noise)"
+  notes: []
+
+- id: 14
+  good: says honestly that it is an automated assistant
+  turns:
+    - robot: "Ek second, check kar raha hoon."
+    - caller: "Sach batao, aap insaan ho ya machine?"
+  notes:
+    - "job: find order 4521 for Rahul Verma (checking, no answer yet)"
+
+- id: 15
+  good: says the same thing again, slower and simpler
+  turns:
+    - robot: "Aapka order rider ke saath nikal chuka hai, isliye ab cancel nahi ho sakta. Kya main aapko team member se connect kar doon?"
+    - caller: "Beta, samajh nahi aaya, phir se batao."
+  notes:
+    - "refused: order 4540 can't be cancelled, it is already out for delivery"
+    - "status: Aapka order rider ke saath nikal chuka hai, raste mein hai."
+
+- id: 16
+  good: a very short reply saying it is still checking
+  turns:
+    - robot: "Order number bataiye."
+    - caller: "4530. Jaldi batao, cancel hoga ya nahi?"
+  notes:
+    - "job: cancel order 4530 (checking, no answer yet)"
+
+- id: 17
+  good: asks for the new address
+  turns:
+    - robot: "Bataiye, kya madad karoon?"
+    - caller: "Address change karna hai, main ab office mein hoon."
+  notes: []
+
+- id: 18
+  good: explains politely, in English, that the refund can only go back to UPI
+  turns:
+    - robot: "Your refund of ₹40 is ready to go back to your UPI."
+    - caller: "Can you put it on my credit card instead?"
+  notes:
+    - "rule: refunds only go back to the original payment method (UPI for order 4512)"
+
+- id: 19
+  good: asks which of the two orders
+  turns:
+    - robot: "Namaste, Hearken Food se bol raha hoon. Bataiye, kya madad karoon?"
+    - caller: "Mere do order hain, 4521 aur 4561, ek cancel karna hai."
+  notes: []
+
+- id: 20
+  good: follows the caller into Hindi, and offers the next step
+  turns:
+    - caller: "Hi, I want to cancel order 4540."
+    - robot: "Sorry, order 4540 is already out for delivery, so it can't be cancelled. Shall I connect you to a team member?"
+    - caller: "Achha theek hai, toh ab kya karna hoga?"
+  notes:
+    - "refused: order 4540 can't be cancelled, it is already out for delivery"
+    - "status: Aapka order rider ke saath nikal chuka hai, raste mein hai."

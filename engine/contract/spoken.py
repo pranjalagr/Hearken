@@ -13,13 +13,14 @@ wrong. A fixed phrase leaves it nothing to translate.
 from __future__ import annotations
 
 import re
+import string
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from engine.contract.action import SpokenQuestion
+from engine.contract.action import Phrase, SpokenQuestion
 
 # Part 2 decision 12: the robot mirrors the caller's mix, Hinglish or English.
 LANGUAGES = ("hinglish", "english")
@@ -63,6 +64,14 @@ class SpokenWords:
     def values(self, group: str) -> set[str]:
         return set(self.groups.get(group, {}))
 
+    def say(self, phrase: Phrase, language: str) -> str:
+        """One phrase in `language`, with its own slots filled ("{rupees}
+        rupaye {paise} paise" -> "249 rupaye 50 paise"). The one way every
+        caller of this class says a phrase: yes-questions and the Talker's
+        [amount] slots (Part 2 decision 10) come out the same."""
+        # A slot with no number raises KeyError: never a hole in what is said.
+        return self.phrase(phrase.group, phrase.value, language).format(**phrase.fill)
+
     def yes_question(self, question: SpokenQuestion, language: str) -> str:
         """Fill the action's line with its values, and its phrases in `language`.
 
@@ -71,11 +80,22 @@ class SpokenWords:
         """
         template = self.phrase(YES_QUESTION, question.line, language)
         filled = dict(question.values)
-        for name, (group, value) in question.phrases.items():
-            filled[name] = self.phrase(group, value, language)
+        for name, phrase in question.phrases.items():
+            filled[name] = self.say(phrase, language)
         # str.format reads only the template, so braces inside a caller's
         # address are copied as they are, never treated as placeholders.
         return template.format(**filled)
+
+
+def _slots(text: Any) -> set[str] | None:
+    """The {names} a phrase will be filled with; None if it isn't text or a
+    brace is broken, which would otherwise crash mid-call instead of at load."""
+    if not isinstance(text, str):
+        return None
+    try:
+        return {name for _, name, _, _ in string.Formatter().parse(text) if name is not None}
+    except ValueError:
+        return None
 
 
 def _problems(group: str, values: Any) -> list[str]:
@@ -92,6 +112,13 @@ def _problems(group: str, values: Any) -> list[str]:
                 problems.append(f"{where}.{language} is empty")
             elif _DEVANAGARI.search(text):
                 problems.append(f"{where}.{language} uses Hindi script; write it in English letters")
+            elif _slots(text) is None:
+                problems.append(f"{where}.{language} has a broken {{slot}}; write {{name}}, or {{{{ for a brace")
             elif group == YES_QUESTION and not text.rstrip().endswith(QUESTION_ENDINGS[language]):
                 problems.append(f"{where}.{language} must end with {QUESTION_ENDINGS[language]!r}")
+        # Every language is filled from the same numbers, so a slot only one
+        # of them has would be a hole in the other.
+        each = [_slots(phrases[language]) for language in LANGUAGES]
+        if None not in each and any(slots != each[0] for slots in each):
+            problems.append(f"{where}: every language needs the same {{slots}}, got {dict(zip(LANGUAGES, map(sorted, each)))}")
     return problems

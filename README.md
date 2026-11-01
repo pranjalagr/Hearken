@@ -62,6 +62,31 @@ microphone, and say something: it comes back 2 seconds later, at phone
 quality (8 kHz). The keypad sends keys, and **Silent drop (test)** makes the
 line go dead without a goodbye, to test a robot's "no audio for 30 s" rule.
 
+### Week-1 checks (real AI and voice services)
+
+These call Google and Sarvam, so they need keys in `pakka/.env` (git-ignored):
+
+```
+GEMINI_API_KEY=...
+SARVAM_API_KEY=...
+```
+
+```powershell
+# decision 2: 20 Talker replies for a person to judge as natural or not
+python -m cli.flash_lite_check
+
+# decision 10: does the Talker put every amount through the [amount] slot? (judged by code)
+python -m cli.money_check
+
+# decision 12: candidate voices, saved at phone quality, with a page to judge them by ear
+python -m cli.voice_test --round screen
+python -m cli.voice_test --lines E3,E9 --voices sarvam-sunny-enhi
+```
+
+Reports, clips and listening pages go to `runs/week1/` (not in git). The voice
+test skips clips it already made, so a run stopped by a daily limit carries on
+where it left off.
+
 ## The wire
 
 One WebSocket per call. Audio goes as binary frames, each exactly one 20 ms
@@ -103,9 +128,12 @@ common/                 shared by robots and callers
   wire/                 the WebSocket line: messages, the caller's speaker, the beat, both ends
   audio/                PCM, resampling, phone sound, background noise, sound files
   stopwatch.py          time stamps for every step of a call
+  env.py                reads the keys in .env, never printing one
 agents/
   common/call_box.py    one box per call: ends cleanly, shields a change already sent
+  agent_c/talker/       the Talker's style prompt, and its [amount] slots and number check
 lab/
+  week1/                the week-1 checks: Talker replies, amounts, voices
   bell_board.py         where backends ring their bells for the director
   caller/director/      exact-moment race lines, tricks and drop tests
   caller/mouth/         the caller's number words (kept apart from any robot code)
@@ -117,9 +145,10 @@ tests/
   engine/               engine tests, run on the toy pack
   food/                 food rules, actions, races and spoken words
   end_to_end/           tasks checked by the task checker, and a real MCP server process
-  common/               the wire (parts and real calls), audio, stopwatch, freeze check
-  agents/               the call box
-  lab/                  bells, director, dummy robot, whole lab calls, number words, web phone
+  common/               the wire (parts and real calls), audio, stopwatch, freeze check, .env
+  agents/               the call box, the Talker's slots
+  lab/                  bells, director, dummy robot, whole lab calls, number words, web phone,
+                        and the week-1 checks (offline: fake networks, no keys needed)
 ```
 
 Tests that run live audio also check that the event loop never freezes for

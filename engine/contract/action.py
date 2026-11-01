@@ -56,6 +56,22 @@ class ActionContext:
 
 
 @dataclass(frozen=True)
+class Phrase:
+    """A ready phrase from the pack's spoken words, said in the caller's language.
+
+    `fill` holds numbers for the phrase's own slots: the phrase
+    "{rupees} rupaye {paise} paise" with fill {"rupees": "249", "paise": "50"}.
+    Part 2 decision 10: "₹249.50" was read as a decimal by 4 of 5 voices, so
+    money with paise needs words around its numbers, and the words differ by
+    language; a plain value can't do that, and a fixed phrase has no numbers.
+    """
+
+    group: str
+    value: str
+    fill: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class SpokenQuestion:
     """The yes-question before it is put into words (Part 2 decision 9).
 
@@ -65,10 +81,10 @@ class SpokenQuestion:
     """
 
     line: str  # a key in the pack's `yes_question` group
-    # Said exactly as given: order number, amount, address.
+    # Said exactly as given, in every language: order number, address.
     values: dict[str, str] = field(default_factory=dict)
-    # name -> (group, value): said as that group's phrase, in the caller's language.
-    phrases: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # Said as the pack's phrase, in the caller's language: payment method, reason, amount.
+    phrases: dict[str, Phrase] = field(default_factory=dict)
 
 
 class Action(ABC):

@@ -1,0 +1,113 @@
+# Moments where the Talker must say an amount (Part 2 decision 10).
+#
+# The voice test (1 Nov 2026) found "₹249.50" read as a decimal ("dashamlav
+# paanch", "point five zero"); the Talker writing amounts itself then got some
+# wrong. So the Talker never writes an amount: the notes show it as [amount],
+# the Talker copies the slot, and code fills it (agents/agent_c/talker/slots.py).
+# Below, the notes are written as the backend's answer; the check swaps the
+# amount for [amount] before the Talker sees them.
+#
+# Same shape as talker_situations.yaml, plus:
+# amount_paise: the backend's amount, which code fills into [amount];
+# language:     the call's language, which picks "rupaye" or "rupees";
+# say:   the filled reply must contain one of these (empty: no amount needed);
+# never: the filled reply must contain none of these.
+# Every reply must also have no number the Talker typed itself (decision 8's
+# check), no made-up slot, and no decimal point between digits.
+
+- id: 1
+  good: says the refund is done, with the amount as 62 rupaye 50 paise
+  amount_paise: 6250
+  language: hinglish
+  turns:
+    - robot: "Ek second, main check kar raha hoon."
+    - caller: "Haan ji, refund ho gaya kya?"
+  notes:
+    - "done: refunded ₹62.50 to upi for order 4512"
+  say: ["62 rupaye 50 paise", "62 rupaye aur 50 paise", "₹62 aur 50 paise"]
+  never: []
+
+- id: 2
+  good: the same in English, as 62 rupees 50 paise
+  amount_paise: 6250
+  language: english
+  turns:
+    - robot: "One moment, I'm checking."
+    - caller: "So is my refund done?"
+  notes:
+    - "done: refunded ₹62.50 to upi for order 4512"
+  say: ["62 rupees 50 paise", "62 rupees and 50 paise", "₹62 and 50 paise"]
+  never: ["rupaye"]
+
+- id: 3
+  good: says the order is cancelled and 249 rupaye 50 paise go back to the card
+  amount_paise: 24950
+  language: hinglish
+  turns:
+    - robot: "Ek second, main cancel kar raha hoon."
+    - caller: "Theek hai, toh cancel ho gaya?"
+  notes:
+    - "done: cancelled order 4521; refund ₹249.50 to card"
+  say: ["249 rupaye 50 paise", "249 rupaye aur 50 paise", "₹249 aur 50 paise"]
+  never: []
+
+- id: 4
+  good: says why it can't, naming the 120 rupaye 50 paise that are left
+  amount_paise: 12050
+  language: hinglish
+  turns:
+    - robot: "Order 4512 mil gaya. Kitne paise wapas chahiye?"
+    - caller: "Mujhe 200 rupaye wapas chahiye."
+  notes:
+    - "refused: That is more than what is left to refund on order 4512 (₹120.50)."
+  say: ["120 rupaye 50 paise", "120 rupaye aur 50 paise", "₹120 aur 50 paise"]
+  never: []
+
+- id: 5
+  good: says what was paid, with five paise as "5", not "05"
+  amount_paise: 124905
+  language: english
+  turns:
+    - robot: "I found your order 4560. It has been delivered."
+    - caller: "How much did I pay for that order?"
+  notes:
+    - "found order 4560; total paid: ₹1249.05; status: Your order has been delivered."
+  say: ["1249 rupees 5 paise", "1249 rupees and 5 paise", "₹1249 and 5 paise",
+        "1,249 rupees 5 paise", "1,249 rupees and 5 paise", "₹1,249 and 5 paise"]
+  never: ["05 paise"]
+
+- id: 6
+  good: says 50 paise came back, not "0 rupaye 50 paise"
+  amount_paise: 50
+  language: hinglish
+  turns:
+    - robot: "Ho gaya, refund bhej diya gaya hai."
+    - caller: "Kitna wapas aaya?"
+  notes:
+    - "done: refunded ₹0.50 to upi for order 4512"
+  say: ["50 paise"]
+  never: ["0 rupaye", "0 rupees", "zero", "shunya"]
+
+- id: 7
+  good: a whole amount stays as it is ("₹450" or "450 rupaye"), with no paise
+  amount_paise: 45000
+  language: hinglish
+  turns:
+    - robot: "Ho gaya, aapka order cancel ho gaya hai."
+    - caller: "Kitne paise wapas aayenge?"
+  notes:
+    - "done: cancelled order 4521; refund ₹450 to card"
+  say: ["₹450", "450 rupaye"]
+  never: ["0 paise", "00 paise"]
+
+- id: 8
+  good: says it is checking; if it repeats the caller's amount, as 99 rupaye 50 paise
+  amount_paise: 9950
+  language: hinglish
+  turns:
+    - robot: "Kitne paise wapas chahiye?"
+    - caller: "Maine bola na, ₹99.50 ka refund chahiye."
+  notes:
+    - "job: refund ₹99.50 on order 4512 to upi (checking, no answer yet)"
+  say: []
+  never: []

@@ -1,0 +1,427 @@
+# The week-1 voice test lines (Part 2, decisions 10 and 12).
+#
+# Every line is written to catch one way a voice can fail on our calls. Each
+# says what to listen for. The same text goes to every voice, as the Talker
+# would write it: English letters, plain digits, the ₹ sign (decision 10:
+# nothing special is done to numbers).
+#
+# lang: hi for Hindi or Hinglish lines, en for English lines.
+# The F lines and the G lines must stay word-for-word what the backend says
+# (a test checks them against packs/food/spoken.yaml).
+
+# ---- A: everyday Hinglish ------------------------------------------------------
+- id: A1
+  category: everyday
+  lang: hi
+  text: "Namaste, Hearken Food se bol raha hoon. Bataiye, main aapki kya madad kar sakta hoon?"
+  listen: Warm, not robotic. "Hearken" said like the English word. Ends like a question.
+- id: A2
+  category: everyday
+  lang: hi
+  text: "Ek second, main check kar raha hoon."
+  listen: '"check" in English. Calm, not rushed.'
+- id: A3
+  category: everyday
+  lang: hi
+  text: "Maaf kijiye, aawaz saaf nahi aayi. Ek baar phir bolenge?"
+  listen: '"aawaz" with a long "aa". The voice rises at the end, like a question.'
+- id: A4
+  category: everyday
+  lang: hi
+  text: "Aapka swagat hai. Hearken Food ko call karne ke liye dhanyavaad!"
+  listen: '"dhanyavaad" clear. Friendly.'
+- id: A5
+  category: everyday
+  lang: hi
+  text: "Thoda sa time lagega, line par rahiye."
+  listen: A silence filler (decision 11). Sounds like a person, not a recording.
+- id: A6
+  category: everyday
+  lang: hi
+  text: "Hello, aap sun rahe hain?"
+  listen: The silence check (decision 13). A real question, not a statement.
+- id: A7
+  category: everyday
+  lang: hi
+  text: "Lagta hai line kat gayi. Dobara call kijiye."
+  listen: '"kat gayi" (cut), not the English word "cat".'
+- id: A8
+  category: everyday
+  lang: hi
+  text: "Main ek automated assistant hoon."
+  listen: '"Main" is the Hindi "main" (I). "automated assistant" in English.'
+
+# ---- B: English words inside Hindi ------------------------------------------------
+- id: B1
+  category: english-in-hindi
+  lang: hi
+  text: "Aapka order cancel karke refund process kar diya hai."
+  listen: '"order", "cancel", "refund", "process" said as English words; the rest Hindi.'
+- id: B2
+  category: english-in-hindi
+  lang: hi
+  text: "Delivery address change karna hai toh naya address bataiye."
+  listen: '"delivery address", "change" in English. "toh" short.'
+- id: B3
+  category: english-in-hindi
+  lang: hi
+  text: "Kya main aapko team member se connect kar doon?"
+  listen: '"team member", "connect" in English. A question.'
+- id: B4
+  category: english-in-hindi
+  lang: hi
+  text: "Aapka payment UPI se hua tha."
+  listen: '"UPI" as three letters, U-P-I. Not a word like "oopi".'
+- id: B5
+  category: english-in-hindi
+  lang: hi
+  text: "Restaurant ne abhi order accept nahi kiya hai."
+  listen: '"restaurant", "accept" in English.'
+- id: B6
+  category: english-in-hindi
+  lang: hi
+  text: "Rider ki live location main nahi dekh sakta."
+  listen: '"live" as in "live location" (lyve), not "liv". "main" is Hindi (I).'
+
+# ---- C: English, for English-speaking callers --------------------------------------
+- id: C1
+  category: english
+  lang: en
+  text: "I'm sorry about that. Could you tell me your order number and the name on the order?"
+  listen: Natural Indian English. A question at the end.
+- id: C2
+  category: english
+  lang: en
+  text: "Your refund of ₹40 has gone back to your UPI."
+  listen: '"forty rupees". "UPI" as letters.'
+- id: C3
+  category: english
+  lang: en
+  text: "Sorry, order 4540 is already out for delivery, so it can't be cancelled."
+  listen: How 4540 is read in English. "can't" clear.
+- id: C4
+  category: english
+  lang: en
+  text: "Shall I connect you to a team member?"
+  listen: A real question.
+
+# ---- D: order numbers (decision 10) ----------------------------------------------
+- id: D1
+  category: order-numbers
+  lang: hi
+  text: "Aapka order number 4521 hai."
+  listen: 'GOOD: digit by digit ("chaar paanch do ek" or "four five two one"). BAD: one big number ("chaar hazaar paanch sau ikkees").'
+- id: D2
+  category: order-numbers
+  lang: hi
+  text: "Order 4530 mil gaya."
+  listen: The 0 at the end is said, not dropped.
+- id: D3
+  category: order-numbers
+  lang: hi
+  text: "Order 4505 ka status bata raha hoon."
+  listen: The 0 in the middle is said.
+- id: D4
+  category: order-numbers
+  lang: hi
+  text: "Order 4500 cancel ho gaya."
+  listen: Both zeros said. BAD if it says "four thousand five hundred".
+- id: D5
+  category: order-numbers
+  lang: hi
+  text: "Aapke do order hain, 4512 aur 4521. Kaunsa cancel karna hai?"
+  listen: The two numbers sound clearly different. "do" here means two.
+- id: D6
+  category: order-numbers
+  lang: hi
+  text: "Aapka order number 4 5 2 1 hai."
+  listen: Decision 10's first fix (spaces between digits). Is it read digit by digit?
+- id: D7
+  category: order-numbers
+  lang: hi
+  text: "Aapka order number chaar paanch do ek hai."
+  listen: Numbers already written as Hindi words. Read correctly?
+
+# ---- E: money ----------------------------------------------------------------
+- id: E1
+  category: money
+  lang: hi
+  text: "₹450 aapke card par wapas aa jayenge."
+  listen: '"chaar sau pachaas rupaye" (or "four fifty rupees"). BAD: "rupees four five zero".'
+- id: E2
+  category: money
+  lang: hi
+  text: "₹40 wapas bhej diye hain."
+  listen: '"chaalees rupaye".'
+- id: E3
+  category: money
+  lang: hi
+  text: "Refund ₹249.50 ka hoga."
+  listen: 'The paise: "do sau unchaas rupaye pachaas paise". BAD: "point five zero".'
+- id: E4
+  category: money
+  lang: hi
+  text: "Total ₹1,250 tha."
+  listen: '"ek hazaar do sau pachaas". The comma is not a pause.'
+- id: E5
+  category: money
+  lang: hi
+  text: "Sirf ₹1 ka farak hai."
+  listen: '"ek rupaye" (or "ek rupaya"). Not skipped.'
+- id: E6
+  category: money
+  lang: hi
+  text: "₹100 ka coupon nahi hai."
+  listen: '"sau rupaye" (or "ek sau rupaye").'
+- id: E7
+  category: money
+  lang: hi
+  text: "Aapko 450 rupaye wapas milenge."
+  listen: The same amount written without the ₹ sign. Compare with E1.
+
+# Added after the screening round (1 Nov 2026): E3's "₹249.50" was read as a
+# decimal by 4 of 5 voices (Sarvam: "dashamlav paanch rupaye"; Google:
+# "point five zero"). E8 is the same failure for English callers; E9-E11 try
+# decision 10's smallest fix: still digits, but the units written as words.
+- id: E8
+  category: money
+  lang: en
+  text: "Your refund will be ₹249.50."
+  listen: '"two hundred forty-nine rupees and fifty paise". BAD: "point five", "point five zero". Compare with E11.'
+- id: E9
+  category: money
+  lang: hi
+  text: "Refund 249 rupaye 50 paise ka hoga."
+  listen: '"do sau unchaas rupaye pachaas paise". Compare with E3.'
+- id: E10
+  category: money
+  lang: hi
+  text: "Refund ₹249 aur 50 paise ka hoga."
+  listen: '"do sau unchaas rupaye aur pachaas paise": the ₹ sign kept. Compare with E3 and E9.'
+- id: E11
+  category: money
+  lang: en
+  text: "Your refund will be 249 rupees 50 paise."
+  listen: '"two hundred forty-nine rupees fifty paise". Compare with E8.'
+
+# ---- F: the yes-questions, exactly as the backend writes them (decision 9) ----------
+- id: F1
+  category: yes-questions
+  lang: hi
+  text: "Order 4521 cancel karke ₹450 aapke card par wapas kar doon? Haan ya nahi?"
+  listen: Every fact clear (order, amount, card). Ends as a question. The most important line type.
+- id: F2
+  category: yes-questions
+  lang: hi
+  text: "Order 4530 cancel karke ₹240 aapke UPI par wapas kar doon? Haan ya nahi?"
+  listen: '"do sau chaalees rupaye". "UPI" as letters.'
+- id: F3
+  category: yes-questions
+  lang: hi
+  text: "Order 4533 cancel kar doon? Cash on delivery tha, toh koi refund nahi banega. Haan ya nahi?"
+  listen: Long, three parts. Each part clear, with small pauses between.
+- id: F4
+  category: yes-questions
+  lang: hi
+  text: "Order 4512 par ₹40 aapke UPI par wapas bhej doon, kyunki item missing tha? Haan ya nahi?"
+  listen: '"item missing" in English. A question.'
+- id: F5
+  category: yes-questions
+  lang: hi
+  text: "Order 4561 ka address badal kar \"Flat 2C, Rose Apartments, Model Town, Ludhiana\" kar doon? Haan ya nahi?"
+  listen: The quote marks are NOT read out. "2C" said as "two C" or "do C".
+- id: F6
+  category: yes-questions
+  lang: en
+  text: "Shall I cancel order 4521 and send ₹450 back to your card? Yes or no?"
+  listen: The English version. Every fact clear.
+- id: F7
+  category: yes-questions
+  lang: en
+  text: "Shall I change the address of order 4561 to \"Flat 2C, Rose Apartments, Model Town, Ludhiana\"? Yes or no?"
+  listen: Quote marks not read out. The address clear.
+# Added 1 Nov 2026 with decision 10's money fix: the backend's own question for
+# an amount with paise, now said with its units as words.
+- id: F8
+  category: yes-questions
+  lang: hi
+  text: "Order 4512 par 120 rupaye 50 paise aapke UPI par wapas bhej doon, kyunki item kharab tha? Haan ya nahi?"
+  listen: '"ek sau bees rupaye pachaas paise". BAD: "dashamlav", "point". Still clearly a question.'
+- id: F9
+  category: yes-questions
+  lang: en
+  text: "Shall I send 120 rupees 50 paise back to your UPI for order 4512, because an item was damaged? Yes or no?"
+  listen: '"one hundred twenty rupees fifty paise". BAD: "point five".'
+
+# ---- G: order status phrases, exactly as packs/food/spoken.yaml has them ------------
+- id: G1
+  category: status-phrases
+  lang: hi
+  text: "Aapka order mil gaya hai, restaurant ne abhi banana shuru nahi kiya."
+  listen: Natural. "restaurant" in English.
+- id: G2
+  category: status-phrases
+  lang: hi
+  text: "Kitchen mein aapka khana ban raha hai."
+  listen: '"Kitchen" in English. "khana" with the right "kh".'
+- id: G3
+  category: status-phrases
+  lang: hi
+  text: "Aapka order rider ke saath nikal chuka hai, raste mein hai."
+  listen: Natural. "rider" in English.
+- id: G4
+  category: status-phrases
+  lang: hi
+  text: "Aapka order deliver ho chuka hai."
+  listen: '"deliver" in English.'
+- id: G5
+  category: status-phrases
+  lang: hi
+  text: "Aapka order cancel ho chuka hai."
+  listen: Natural.
+- id: G6
+  category: status-phrases
+  lang: en
+  text: "Your food is being prepared in the kitchen."
+  listen: Natural Indian English.
+
+# ---- H: Indian names ----------------------------------------------------------
+- id: H1
+  category: names
+  lang: hi
+  text: "Rahul Verma ji, aapka order mil gaya."
+  listen: '"Verma" (not "Vurma"). "ji" respectful.'
+- id: H2
+  category: names
+  lang: hi
+  text: "Priya Sharma ke naam par do order hain."
+  listen: '"Sharma". "do" means two.'
+- id: H3
+  category: names
+  lang: hi
+  text: "Aman Gupta, Neha Singh, Vikram Rao aur Sana Khan."
+  listen: Every name right. "Rao" one syllable. "Khan" with "kh".
+
+# ---- I: addresses ------------------------------------------------------------
+- id: I1
+  category: addresses
+  lang: hi
+  text: "Flat 12B, Shanti Apartments, Sector 21, Noida."
+  listen: '"12B" as "twelve B" (or "baarah B"). "Sector 21".'
+- id: I2
+  category: addresses
+  lang: hi
+  text: "Shop 4, Main Market, Lajpat Nagar, Delhi."
+  listen: Here "Main" is the ENGLISH word (main market). Compare with A8 and K1.
+- id: I3
+  category: addresses
+  lang: hi
+  text: "House 22, Sector 5, Salt Lake, Kolkata."
+  listen: All parts clear.
+
+# ---- J: food items -----------------------------------------------------------
+- id: J1
+  category: food
+  lang: hi
+  text: "Paneer Butter Masala aur do Butter Naan."
+  listen: '"do" is the Hindi TWO, not the English "do".'
+- id: J2
+  category: food
+  lang: hi
+  text: "Ek Raita aur do Gulab Jamun missing the."
+  listen: '"the" is the Hindi "the" (were), NOT the English "the". "Raita" right.'
+- id: J3
+  category: food
+  lang: hi
+  text: "Chole Bhature aur Sweet Lassi."
+  listen: '"Chole Bhature" right.'
+
+# ---- K: Hindi words that look like English words ----------------------------------
+- id: K1
+  category: look-alike-words
+  lang: hi
+  text: "Main abhi aapka order dekh raha hoon."
+  listen: '"Main" is the Hindi "main" (I), not the English "main".'
+- id: K2
+  category: look-alike-words
+  lang: hi
+  text: "Ye wala order aapka hai na?"
+  listen: '"na" as a short question tag, not the English "na".'
+- id: K3
+  category: look-alike-words
+  lang: hi
+  text: "Woh pehle hi out for delivery ho chuka tha."
+  listen: '"out for delivery" in English. "tha" Hindi.'
+- id: K4
+  category: look-alike-words
+  lang: hi
+  text: "Haan, bilkul, kar do."
+  listen: '"kar do" (do it) Hindi. Not the English "do".'
+- id: K5
+  category: look-alike-words
+  lang: hi
+  text: "To phir main aapko team member se connect karta hoon."
+  listen: '"To" is the Hindi "toh" (so), not the English "to".'
+
+# ---- L: very short lines -------------------------------------------------------
+- id: L1
+  category: very-short
+  lang: hi
+  text: "Ji."
+  listen: Not cut off, not garbled, not a strange sound.
+- id: L2
+  category: very-short
+  lang: hi
+  text: "Haan ji."
+  listen: Clear and natural.
+- id: L3
+  category: very-short
+  lang: hi
+  text: "Theek hai."
+  listen: Clear and natural.
+
+# ---- M: pauses and a long line ------------------------------------------------------
+- id: M1
+  category: pauses-and-long
+  lang: hi
+  text: "Maaf kijiye... ek second."
+  listen: The "..." is a short pause, not read out.
+- id: M2
+  category: pauses-and-long
+  lang: hi
+  text: "Aapka order rider ke saath nikal chuka hai, isliye ab cancel nahi ho sakta. Agar aap chahein, toh main aapko kisi team member se connect kar sakta hoon, jo aapki aage madad karenge."
+  listen: Stays natural over a long line. No rushing, no robotic flat pace.
+
+# ---- N: English letters vs Hindi letters (decision 12's rule) ----------------------
+# Each pair is the same sentence. If the Hindi-letters version is clearly better,
+# decision 12 says to consider Hindi letters for the voice.
+- id: N1
+  category: script
+  lang: hi
+  text: "Aapka order cancel ho gaya hai aur refund aapke card par aa jayega."
+  listen: English letters. Compare with N2.
+- id: N2
+  category: script
+  lang: hi
+  text: "आपका order cancel हो गया है और refund आपके card पर आ जाएगा।"
+  listen: Hindi letters for the Hindi words. Clearly better than N1?
+- id: N3
+  category: script
+  lang: hi
+  text: "Kya main aapko team member se connect kar doon?"
+  listen: English letters. Compare with N4.
+- id: N4
+  category: script
+  lang: hi
+  text: "क्या मैं आपको team member से connect कर दूँ?"
+  listen: Hindi letters. Clearly better than N3?
+- id: N5
+  category: script
+  lang: hi
+  text: "Order 4521 ka ₹450 refund ho gaya."
+  listen: English letters, with numbers. Compare with N6.
+- id: N6
+  category: script
+  lang: hi
+  text: "Order 4521 का ₹450 refund हो गया।"
+  listen: Hindi letters, with numbers. Clearly better than N5?

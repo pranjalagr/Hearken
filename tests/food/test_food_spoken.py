@@ -1,4 +1,6 @@
-"""The food pack's spoken words (Part 2 decisions 8 and 9)."""
+"""The food pack's spoken words (Part 2 decisions 8, 9 and 10)."""
+
+import pytest
 
 from engine.contract.action import Action
 from engine.contract.spoken import LANGUAGES
@@ -72,6 +74,43 @@ async def test_refund_names_the_amount_the_method_and_the_reason(open_call):
     )
     assert asked["hinglish"] == "Order 4512 par ₹40 aapke UPI par wapas bhej doon, kyunki item missing tha? Haan ya nahi?"
     assert asked["english"] == "Shall I send ₹40 back to your UPI for order 4512, because an item was missing? Yes or no?"
+
+
+# ---- money with paise (decision 10) ---------------------------------------------
+# The voice test (1 Nov 2026) found "₹249.50" read as a decimal ("dashamlav
+# paanch", "point five zero"), so the caller hears the units as words instead.
+
+
+def test_the_money_words_cover_every_kind_of_amount():
+    assert FoodPack().spoken_words().values("money") == {"whole", "with_paise", "only_paise"}
+
+
+async def test_cancel_says_a_paise_refund_with_its_units_as_words(open_call):
+    kit = await open_call(FoodPack())
+    async with kit.db.transaction() as tx:  # an order that cost ₹249.50
+        assert await tx.execute("UPDATE orders SET amount_paise = 24950 WHERE order_no = 4521") == 1
+    prepared = await kit.tool("prepare_cancel_order", order_no=4521, customer_name="Rahul")
+    asked = {language: await kit.guard.question(prepared.data["token"], language) for language in LANGUAGES}
+    assert asked["hinglish"] == "Order 4521 cancel karke 249 rupaye 50 paise aapke card par wapas kar doon? Haan ya nahi?"
+    assert asked["english"] == "Shall I cancel order 4521 and send 249 rupees 50 paise back to your card? Yes or no?"
+    # The log and the AI's tool reply keep the short written form: they aren't spoken.
+    assert prepared.data["summary"] == "cancel order 4521 and refund ₹249.50 to card"
+
+
+@pytest.mark.parametrize(("rupees", "hinglish", "english"), [
+    (40.5, "40 rupaye 50 paise", "40 rupees 50 paise"),
+    (40.05, "40 rupaye 5 paise", "40 rupees 5 paise"),
+    (0.5, "50 paise", "50 paise"),
+    (40, "₹40", "₹40"),
+])
+async def test_refund_says_the_amount_the_way_people_say_money(open_call, rupees, hinglish, english):
+    kit = await open_call(FoodPack())
+    asked = await ask(
+        kit, "prepare_refund_order", order_no=4512, customer_name="Priya", amount_rupees=rupees, reason="missing_item"
+    )
+    assert asked["hinglish"] == f"Order 4512 par {hinglish} aapke UPI par wapas bhej doon, kyunki item missing tha? Haan ya nahi?"
+    assert asked["english"] == f"Shall I send {english} back to your UPI for order 4512, because an item was missing? Yes or no?"
+    assert "." not in asked["hinglish"].replace("?", "")  # no decimal point left for a voice to misread
 
 
 async def test_change_address_reads_the_new_address_back_exactly(open_call):

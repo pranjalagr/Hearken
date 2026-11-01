@@ -1,7 +1,10 @@
 """Food rules and money helpers, as plain functions (no database needed)."""
 
+import pytest
+
+from engine.contract.action import Phrase
 from packs.food import rules
-from packs.food.money import format_rupees, rupees_to_paise
+from packs.food.money import format_rupees, rupees_to_paise, spoken_amount
 from packs.food.order_store import Order
 
 
@@ -51,3 +54,19 @@ def test_money_helpers_never_lose_a_paisa():
     assert rupees_to_paise(1.234) is None
     assert format_rupees(45000) == "₹450"
     assert format_rupees(24950) == "₹249.50"
+
+
+@pytest.mark.parametrize(("paise", "said"), [
+    (45000, Phrase("money", "whole", {"rupees": "450"})),
+    (100, Phrase("money", "whole", {"rupees": "1"})),
+    (24950, Phrase("money", "with_paise", {"rupees": "249", "paise": "50"})),
+    # "05" would be read "zero five"; it is five paise.
+    (24905, Phrase("money", "with_paise", {"rupees": "249", "paise": "5"})),
+    (12001, Phrase("money", "with_paise", {"rupees": "120", "paise": "1"})),
+    # Nobody says "0 rupaye 50 paise".
+    (50, Phrase("money", "only_paise", {"paise": "50"})),
+    (123456789, Phrase("money", "with_paise", {"rupees": "1234567", "paise": "89"})),
+])
+def test_an_amount_is_said_with_its_units_as_words_when_it_has_paise(paise, said):
+    """Part 2 decision 10: "₹249.50" was read as a decimal by 4 of 5 voices."""
+    assert spoken_amount(paise) == said

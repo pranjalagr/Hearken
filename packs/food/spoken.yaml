@@ -47,10 +47,26 @@ refund_reason:
     hinglish: "item kharab tha"
     english: "an item was damaged"
 
+# How an amount is said (Part 2 decision 10). The voice test (1 Nov 2026) found
+# "₹249.50" read as a decimal: "dashamlav paanch rupaye", "point five zero". So
+# money with paise keeps its digits but says its units as words, which both
+# Sarvam voices read right. Whole amounts keep the ₹ sign: read right already.
+# Paise are plain digits ("5", not "05", which would be read "zero five").
+money:
+  whole:
+    hinglish: "₹{rupees}"
+    english: "₹{rupees}"
+  with_paise:
+    hinglish: "{rupees} rupaye {paise} paise"
+    english: "{rupees} rupees {paise} paise"
+  only_paise:
+    hinglish: "{paise} paise"
+    english: "{paise} paise"
+
 # Part 2 decision 9: the yes-question, filled in by code with the backend's own
 # numbers. Each one must end with "Haan ya nahi?" / "Yes or no?" (checked on load),
 # so the Guard always judges an answer to the same closed question.
-# Placeholders: {order_no} {amount} {new_address} as given; {payment} {reason}
+# Placeholders: {order_no} {new_address} as given; {payment} {reason} {amount}
 # come from the groups above, in the caller's language.
 yes_question:
   cancel_with_refund:

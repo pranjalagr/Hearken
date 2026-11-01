@@ -23,7 +23,7 @@ from engine.storage.database import sqlite_session
 from lab.bell_board import BellBoard
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-TASK = PROJECT_ROOT / "packs" / "food" / "tasks" / "food_01_cancel_prepaid.yaml"
+TASK = PROJECT_ROOT / "packs" / "food" / "tasks" / "practice" / "food_01_cancel_prepaid.yaml"
 RAHUL = {"order_no": 4521, "customer_name": "Rahul Verma"}
 
 
@@ -120,7 +120,7 @@ async def test_the_real_server_rings_the_labs_bells(tmp_path):
 
 
 async def test_plain_mode_over_mcp_shows_plain_tools_and_reports_timeouts_as_errors(tmp_path):
-    task = PROJECT_ROOT / "packs" / "food" / "tasks" / "food_03_missing_item_reply_lost.yaml"
+    task = PROJECT_ROOT / "packs" / "food" / "tasks" / "practice" / "food_03_missing_item_reply_lost.yaml"
     db_path = await make_call(str(task), "plain", False, str(tmp_path))
     async with stdio_client(server_for(db_path)) as (read, write):
         async with ClientSession(read, write) as session:

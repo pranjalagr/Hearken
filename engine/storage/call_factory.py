@@ -25,6 +25,10 @@ class CallFactory:
         self._template = workdir / "templates" / f"{pack.name}.db"
         self._calls_dir = workdir / "calls"
         self._template_built = False
+        # Many calls start at once in the lab (Part 5): without this, each would
+        # rebuild the one template file while the others read it, and on
+        # 1 Nov 2026 five such calls locked each other up for good.
+        self._building = asyncio.Lock()
 
     async def build_template(self) -> Path:
         """Build the pack's starting file: engine tables + pack tables + seed data.
@@ -45,8 +49,9 @@ class CallFactory:
         """Make a fresh copy for one call and write its settings into it."""
         if settings.pack != self._pack.name:
             raise ValueError(f"call is for pack {settings.pack!r}, factory makes {self._pack.name!r}")
-        if not self._template_built:
-            await self.build_template()
+        async with self._building:
+            if not self._template_built:
+                await self.build_template()
         path = self._calls_dir / f"{settings.call_id}.db"
         if path.exists():
             # Reusing a copy would mean the call does not start fresh.

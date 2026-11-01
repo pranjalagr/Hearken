@@ -14,6 +14,8 @@ import httpx
 import numpy as np
 import pytest
 
+from common.google import google_client
+from common.retry import asked_wait_s, worth_retrying
 from engine.contract.spoken import LANGUAGES
 from lab.week1.voice_test import (
     CATEGORIES,
@@ -23,8 +25,6 @@ from lab.week1.voice_test import (
     SETUPS_BY_NAME,
     Spoken,
     VoiceLine,
-    asked_wait_s,
-    google_client,
     google_speak,
     listening_page,
     load_lines,
@@ -33,7 +33,6 @@ from lab.week1.voice_test import (
     sarvam_speak,
     timing_summary,
     with_retries,
-    worth_retrying,
     write_page,
 )
 from packs.food.pack import FoodPack
@@ -269,7 +268,7 @@ def fake_google(reply):
         sent.append(request)
         return reply(request)
 
-    return google_client("not-a-real-key", httpx.Client(transport=httpx.MockTransport(handle))), sent
+    return google_client("not-a-real-key", REQUEST_TIMEOUT_S, httpx.Client(transport=httpx.MockTransport(handle))), sent
 
 
 def google_error(status):

@@ -1,0 +1,30 @@
+id: food_14_address_corrected_while_saving
+pack: food
+goal: >
+  You are Aman Gupta. Change the address of order 4530 to "House 74, Sector 15,
+  Gurgaon", but first say it wrong, as house 47. While the robot is saving it,
+  correct yourself: "nahi nahi, 47 nahi, 74". Say numbers the Indian way.
+uses: [4530]
+jobs: [change_address]
+caller:
+  name: Aman Gupta
+  facts:
+    order_no: 4530
+    new_address: "House 74, Sector 15, Gurgaon"
+  wants: the address of order 4530 changed to House 74, Sector 15, Gurgaon
+  personality: quiet
+  language: mostly_hindi
+  voice: male_young
+  number_style: hindi_pairs
+  tricks: [indian_numbers]
+  opening_line: "Haan ji, mujhe address badalna hai."
+race:
+  moment: while_running
+  action: change_address
+  line: "nahi nahi, 47 nahi, 74"
+  then_wants: the address House 74, Sector 15, Gurgaon
+# The wrong address may be saved first; what counts is the address at the end.
+expect:
+  - table: orders
+    where: {order_no: 4530}
+    fields: {address: "House 74, Sector 15, Gurgaon", status: placed}

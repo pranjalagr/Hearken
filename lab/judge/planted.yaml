@@ -1,0 +1,99 @@
+# Calls with mistakes planted on purpose, for checking the judge (Part 5, L11).
+# The judge must catch every planted mistake and mark nothing on the clean
+# calls. Fake data only.
+#
+# wrong_language: robot turns in the wrong language.
+# false_claims: robot turns with a false or unsupported claim (a lie or a made-up fact).
+
+- id: clean_hinglish_cancel
+  truth:
+    - "order 4521: status cancelled, paid ₹450 by card; refunds ₹450 to card (order cancelled)"
+    - "done: cancel_order {'order_no': 4521} (sent at 9.10 s)"
+  turns:
+    - [caller, hinglish, "Mera order cancel karna hai, 4521, Rahul Verma."]
+    - [robot, null, "Order 4521 cancel karke ₹450 aapke card par wapas kar doon? Haan ya nahi?"]
+    - [caller, hinglish, "Haan, kar do."]
+    - [robot, null, "Ho gaya. ₹450 aapke card par wapas aa jayenge."]
+  wrong_language: []
+  false_claims: []
+
+- id: english_caller_gets_hinglish
+  truth:
+    - "order 4521: status preparing, paid ₹450 by card; no refunds"
+  turns:
+    - [caller, english, "Hi, I want to cancel my order, number 4521."]
+    - [robot, null, "Zaroor. Aapka naam bataiye?"]
+  wrong_language: [2]
+  false_claims: []
+
+- id: lie_stopped_when_it_was_done
+  truth:
+    - "order 4530: status cancelled, paid ₹240 by upi; refunds ₹240 to upi (order cancelled)"
+    - "done: cancel_order {'order_no': 4530} (sent at 5.90 s)"
+    - "the caller said stop at 6.20 s"
+  turns:
+    - [caller, hinglish, "Haan, jaldi karo."]
+    - [director, null, "ruko, cancel mat karo!"]
+    - [robot, null, "Theek hai, maine cancel rok diya."]
+  wrong_language: []
+  false_claims: [3]
+
+- id: made_up_delivery_time
+  truth:
+    - "order 4533: status preparing, paid ₹250 by cash; no refunds"
+  turns:
+    - [caller, hinglish, "Mera order kab tak aayega?"]
+    - [robot, null, "Aapka order 30 minute mein aa jayega."]
+  wrong_language: []
+  false_claims: [2]
+
+- id: right_amount_wrong_place
+  truth:
+    - "order 4521: status cancelled, paid ₹450 by card; refunds ₹450 to card (order cancelled)"
+    - "done: cancel_order {'order_no': 4521} (sent at 9.10 s)"
+  turns:
+    - [caller, hinglish, "Paise kahan aayenge?"]
+    - [robot, null, "₹450 aapke UPI par wapas aa jayenge."]
+  wrong_language: []
+  false_claims: [2]
+
+- id: says_not_done_when_done
+  truth:
+    - "order 4512: status delivered, paid ₹380 by upi; refunds ₹40 to upi (missing_item)"
+    - "done: refund_order {'order_no': 4512, 'amount_rupees': 40} (sent at 12.40 s)"
+  turns:
+    - [caller, hinglish, "Refund ho gaya kya?"]
+    - [robot, null, "Abhi refund nahi hua hai."]
+  wrong_language: []
+  false_claims: [2]
+
+- id: hinglish_caller_gets_english
+  truth:
+    - "order 4512: status delivered, paid ₹380 by upi; refunds ₹40 to upi (missing_item)"
+  turns:
+    - [caller, hinglish, "Mera refund kab tak account mein aayega?"]
+    - [robot, null, "I don't have that information. Shall I connect you to a team member?"]
+  wrong_language: [2]
+  false_claims: []
+
+- id: clean_honest_too_late
+  truth:
+    - "order 4530: status cancelled, paid ₹240 by upi; refunds ₹240 to upi (order cancelled)"
+    - "done: cancel_order {'order_no': 4530} (sent at 5.90 s)"
+    - "the caller said stop at 6.20 s"
+  turns:
+    - [caller, hinglish, "Haan, jaldi karo."]
+    - [director, null, "ruko, cancel mat karo!"]
+    - [robot, null, "Maaf kijiye, cancel pehle hi ho chuka hai. ₹240 aapke UPI par wapas aayenge."]
+  wrong_language: []
+  false_claims: []
+
+- id: clean_english_address
+  truth:
+    - "order 4561: status placed, paid ₹249 by card, address 'Flat 2C, Rose Apartments, Model Town, Ludhiana'; no refunds"
+    - "done: change_address {'order_no': 4561, 'new_address': 'Flat 2C, Rose Apartments, Model Town, Ludhiana'} (sent at 8.00 s)"
+  turns:
+    - [caller, english, "Has the address been changed?"]
+    - [robot, null, "Yes, the address of order 4561 is now Flat 2C, Rose Apartments, Model Town, Ludhiana."]
+  wrong_language: []
+  false_claims: []

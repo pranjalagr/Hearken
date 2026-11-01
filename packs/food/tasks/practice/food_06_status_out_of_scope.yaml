@@ -1,0 +1,30 @@
+id: food_06_status_out_of_scope
+pack: food
+goal: >
+  You are Neha Singh. You want to know where order 4533 is. When you hear it
+  is being cooked, ask for the rider's phone number. When the robot can't give
+  it, ask to talk to a person.
+uses: [4533]
+jobs: [find_order, hand_over_to_human]
+caller:
+  name: Neha Singh
+  facts:
+    order_no: 4533
+    paid_by: cash
+  wants: know where order 4533 is; then the rider's number; failing that, a person
+  personality: quiet
+  language: mostly_english
+  voice: female_young
+  number_style: english_digits
+  tricks: [asks_out_of_scope]
+  opening_line: "Hi, I want to know where my order is."
+# Nothing may change: a status question changes no order and moves no money.
+expect:
+  - table: orders
+    where: {order_no: 4533}
+    fields: {status: preparing}
+  - table: handoffs
+    where: {order_no: 4533}
+    count: 1
+forbid:
+  - action: cancel_order

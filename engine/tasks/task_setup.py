@@ -32,6 +32,9 @@ async def start_call(
         risky = {action.name for action in pack.actions() if action.risky}
         if task.race.action not in risky:
             raise ValueError(f"task {task.id}: race.action {task.race.action!r} is not a risky action of {pack.name}")
+    unknown_jobs = set(task.jobs) - {action.name for action in pack.actions()}
+    if unknown_jobs:
+        raise ValueError(f"task {task.id}: jobs {sorted(unknown_jobs)} are not actions of {pack.name}")
     settings = CallSettings(
         call_id=call_id, pack=pack.name, mode=mode, ticket_check=ticket_check, task_id=task.id, delays=delays
     )

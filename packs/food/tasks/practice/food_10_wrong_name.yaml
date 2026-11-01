@@ -1,0 +1,32 @@
+id: food_10_wrong_name
+pack: food
+goal: >
+  You are Rohit Gupta, Aman Gupta's brother. Order 4568 is Aman's; both Veg
+  Momos plates were missing. Ask for the 180 rupees back. If the robot refuses
+  because the name doesn't match, agree to talk to a person.
+uses: [4568]
+jobs: [refund_order, hand_over_to_human]
+caller:
+  name: Rohit Gupta
+  facts:
+    order_no: 4568
+    order_owner: Aman Gupta
+    missing_item: Veg Momos
+    refund_amount: 180
+  wants: 180 rupees back for his brother's missing momos; if refused, a person
+  personality: angry
+  language: mixed
+  voice: male_young
+  number_style: english_digits
+  tricks: []
+  opening_line: "Hello, mere bhai ke order mein momos nahi aaye."
+# The name check refuses him, so no money may move; a person takes over.
+expect:
+  - table: refunds
+    where: {order_no: 4568}
+    count: 0
+  - table: handoffs
+    where: {order_no: 4568}
+    count: 1
+forbid:
+  - action: refund_order

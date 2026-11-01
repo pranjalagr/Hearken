@@ -144,6 +144,7 @@ class Director:
         # Drop state.
         self._dropped = False
         self._drop_after_speech = False
+        self._drop_after_race = False  # a while_action_runs drop waiting for the race line
         self._drop_at_ms: int | None = None
         if plan.drop is not None and plan.drop.moment == "random":
             low, high = settings.drop_random_window_s
@@ -236,8 +237,13 @@ class Director:
     def _on_bell(self, bell: Bell, ms: int) -> None:
         drop = self._plan.drop
         if drop is not None and drop.moment == "while_action_runs" and bell.bell == SAVING:
-            self._drop("while_action_runs")
-            return
+            if self._race_comes_first(bell):
+                # Part 5 L1, task 15: "ruko!" while saving, THEN the line dies.
+                # Dropping now would cut the race line before it could play.
+                self._drop_after_race = True
+            else:
+                self._drop("while_action_runs")
+                return
         race, report = self._plan.race, self._report.race
         if race is None or bell.action != race.action or report.hit is not None:
             return
@@ -263,6 +269,17 @@ class Director:
                 self._race_fire_at_ms = None
                 if self._queue_kind == "race":
                     self._queue.clear()
+
+    def _race_comes_first(self, bell: Bell) -> bool:
+        """A while_running race on the same action is planned and not yet said."""
+        race, report = self._plan.race, self._report.race
+        return (
+            race is not None
+            and race.moment == "while_running"
+            and race.action == bell.action
+            and report.line_ms is None
+            and report.hit is None
+        )
 
     def _race_tick(self, ms: int) -> None:
         race, report = self._plan.race, self._report.race
@@ -344,6 +361,13 @@ class Director:
         if drop is None:
             return
         moment = drop.moment
+        if self._drop_after_race:
+            report = self._report.race
+            race_line_done = report.line_ms is not None and self._queue_kind == "race" and not self._queue
+            # Missed (the save came first): nothing left to wait for, drop now.
+            if race_line_done or report.hit is False:
+                self._drop(moment)
+            return
         # A drop decided now takes effect on the next piece, PIECE_MS later
         # (see the timing rule above); conditions on time count that in.
         if moment == "random" and ms + PIECE_MS >= self._drop_at_ms:
@@ -464,15 +488,33 @@ def caller_with_director(
     ear: Ear | None = None,
     on_event=None,
     settings: DirectorSettings = DirectorSettings(),
+    tap=None,
+    on_cleared=None,
 ) -> tuple[CallerLine, Director]:
     """Wire a caller line with the director in front of the brain's mouth and
-    behind the caller's ear. The one place this wiring is done."""
+    behind the caller's ear. The one place this wiring is done.
+
+    `tap(tick, piece)` sees every piece the caller really sends, director
+    lines included: the lab's recorder (Part 5, L5/L6) keeps the caller's
+    side of the call from it."""
     playback = Playback()
     controls = LineControls()
     director = Director(plan, recordings, brain_mic, playback, controls, on_event, settings)
-    line = CallerLine(url, call_id, director.mic, director.ear(ear or NullEar()), playback=playback)
+    mic = director.mic if tap is None else _TappedMic(director.mic, tap)
+    line = CallerLine(url, call_id, mic, director.ear(ear or NullEar()), playback=playback, on_cleared=on_cleared)
     controls.bind(line)
     return line, director
+
+
+class _TappedMic:
+    def __init__(self, inner, tap) -> None:
+        self._inner = inner
+        self._tap = tap
+
+    def next_piece(self, tick: int) -> bytes:
+        piece = self._inner.next_piece(tick)
+        self._tap(tick, piece)
+        return piece
 
 
 async def follow_bells(director: Director, bells: asyncio.Queue) -> None:

@@ -4,6 +4,7 @@ goal: >
   You are Aman Gupta. Cancel order 4530 (paid by UPI). While the agent is
   asking "cancel kar doon?", the rider picks the order up.
 uses: [4530]
+jobs: [cancel_order]
 # The caller doesn't know about the rider: that is the timeline's secret (C6).
 caller:
   name: Aman Gupta

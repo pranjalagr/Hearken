@@ -1,0 +1,36 @@
+id: food_15_ruko_while_saving_then_drop
+pack: food
+goal: >
+  You are Rahul Verma, in a hurry. Cancel order 4521. While it is being saved,
+  shout "ruko!", and then the line dies: nobody hears anything after that.
+uses: [4521]
+jobs: [cancel_order]
+caller:
+  name: Rahul Verma
+  facts:
+    order_no: 4521
+    paid_by: card
+  wants: cancel order 4521
+  personality: in_a_hurry
+  language: mixed
+  voice: male_young
+  number_style: hindi_digits
+  tricks: [drops_call]
+  opening_line: "Order cancel karna hai, abhi."
+race:
+  moment: while_running
+  action: cancel_order
+  line: "ruko!"
+  then_wants: keep the order
+# The line dies after the "ruko": the change already sent must still finish,
+# exactly once (decision 14's shielded change), with nobody left to tell.
+drop:
+  moment: while_action_runs
+  kind: silent
+expect:
+  - table: orders
+    where: {order_no: 4521}
+    fields: {status: cancelled}
+  - table: refunds
+    where: {order_no: 4521}
+    fields: {amount_paise: 45000, method: card}

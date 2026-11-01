@@ -1,6 +1,6 @@
 """Make a fresh call copy from a task file and print where it is.
 
-    python -m cli.make_call --task packs/food/tasks/food_01_cancel_prepaid.yaml --mode safe
+    python -m cli.make_call --task packs/food/tasks/practice/food_01_cancel_prepaid.yaml --mode safe
 
 Then start its tool server with:  python -m cli.serve_call --db <printed path>
 """

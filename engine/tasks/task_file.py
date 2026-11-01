@@ -66,6 +66,10 @@ class Task:
     caller: CallerSpec | None = None
     race: RaceSpec | None = None
     drop: DropSpec | None = None
+    # Part 5, L1: which of the pack's actions the task is about (find_order
+    # stands for "where is my order?"), so the task set's coverage is counted
+    # by code. Checked against the pack when a call is set up.
+    jobs: tuple[str, ...] = ()
 
 
 def load_task(path: Path) -> Task:
@@ -74,6 +78,9 @@ def load_task(path: Path) -> Task:
         if "caller" not in raw:
             # Without it, no pretend caller could ever run this task.
             raise ValueError("every task needs a caller: section")
+        jobs = raw.get("jobs")
+        if not isinstance(jobs, list) or not jobs or len(set(jobs)) != len(jobs):
+            raise ValueError("every task needs jobs: a list of its pack's actions, each once")
         task = Task(
             id=raw["id"],
             pack=raw["pack"],
@@ -89,6 +96,7 @@ def load_task(path: Path) -> Task:
             caller=parse_caller(raw["caller"]),
             race=parse_race(raw["race"]) if "race" in raw else None,
             drop=parse_drop(raw["drop"]) if "drop" in raw else None,
+            jobs=tuple(jobs),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"bad task file {path.name}: {exc}") from exc

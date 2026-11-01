@@ -1,0 +1,36 @@
+id: food_07_ruko_while_asking
+pack: food
+goal: >
+  You are Rahul Verma. Ask where order 4521 is. When you hear it is being
+  cooked, say you want to cancel it. While the robot is still asking "cancel
+  kar doon?", change your mind: you will wait for the food.
+uses: [4521]
+jobs: [find_order, cancel_order]
+caller:
+  name: Rahul Verma
+  facts:
+    order_no: 4521
+    paid_by: card
+  wants: ask about order 4521, then cancel it, then change your mind and keep it
+  personality: patient
+  language: mixed
+  voice: male_young
+  number_style: hindi_digits
+  tricks: [changes_mind]
+  opening_line: "Hello, mera order kahan tak pahuncha?"
+# The yes-question only exists in safe mode (race moment 1, C10).
+modes: [safe]
+race:
+  moment: while_asking
+  action: cancel_order
+  line: "ruko ruko, mat karo, main wait kar leta hoon"
+  then_wants: keep the order and wait for it
+expect:
+  - table: orders
+    where: {order_no: 4521}
+    fields: {status: preparing}
+  - table: refunds
+    where: {order_no: 4521}
+    count: 0
+forbid:
+  - action: cancel_order

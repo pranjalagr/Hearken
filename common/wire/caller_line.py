@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Protocol
 
 from websockets.asyncio.client import ClientConnection, connect
@@ -98,11 +98,15 @@ class CallerLine:
         ear: Ear | None = None,
         pacer: Pacer | None = None,
         playback: Playback | None = None,
+        on_cleared: Callable[[int], None] | None = None,
     ) -> None:
         self._url = url
         self._call_id = call_id
         self._mic = mic
         self._ear = ear or NullEar()
+        # Told the caller's time whenever the robot clears the speaker: the
+        # robot stopping mid-sentence, as the caller hears it (Part 5, L9).
+        self._on_cleared = on_cleared
         self._pacer = pacer or Pacer()
         # Passed in when something (the director) must watch the speaker
         # before the line exists.
@@ -206,6 +210,8 @@ class CallerLine:
             self._playback.add_mark(message.name)
         elif isinstance(message, Clear):
             dropped = self._playback.clear()
+            if self._on_cleared is not None:
+                self._on_cleared(self.caller_ms)
             if not self._silent:
                 reply = Cleared(self._playback.played_pieces, self.caller_ms, tuple(dropped))
                 await self._send(encode(reply))

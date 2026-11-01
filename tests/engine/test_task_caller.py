@@ -10,7 +10,7 @@ from engine.tasks.caller_spec import CallerSpec, DropSpec, RaceSpec
 from engine.tasks.task_file import Task, load_task, load_tasks
 from packs.food.pack import FoodPack
 
-TASKS_DIR = Path(__file__).resolve().parents[2] / "packs" / "food" / "tasks"
+TASKS_DIR = Path(__file__).resolve().parents[2] / "packs" / "food" / "tasks" / "practice"
 
 CALLER = {
     "name": "Rahul Verma",
@@ -26,7 +26,7 @@ CALLER = {
 
 
 def task_file(tmp_path, **sections) -> Path:
-    body = {"id": "t1", "pack": "food", "goal": "test", "uses": [4521], "caller": dict(CALLER)}
+    body = {"id": "t1", "pack": "food", "goal": "test", "uses": [4521], "jobs": ["cancel_order"], "caller": dict(CALLER)}
     for key, value in sections.items():
         if value is None:
             body.pop(key, None)
@@ -179,8 +179,28 @@ async def test_every_real_task_passes_the_fact_check(open_call, task_id):
         ({"order_no": 4521, "amount": 400}, "Rahul Verma", (4521,), "cost 450 rupees"),
         ({"order_no": 4521, "colour": "red"}, "Rahul Verma", (4521,), "unknown fact 'colour'"),
         ({"order_no": 4521, "missing_item": "Raita"}, "Rahul Verma", (4521,), "has no item 'Raita'"),
-        ({"order_no": 4512, "missing_item": "Raita", "refund_amount": 50}, "Priya Sharma", (4512,), "cost 40 rupees"),
+        ({"order_no": 4512, "missing_item": "Raita", "refund_amount": 50}, "Priya Sharma", (4512,),
+         "Raita refunds can be 40 rupees, not 50"),
+        # Part 5 L1 (task 8): some of an item's units, but never more than it had or a made-up amount.
+        ({"order_no": 4547, "missing_item": "Veg Thali", "refund_amount": 750}, "Sana Khan", (4547,),
+         "Veg Thali refunds can be 250, 500 rupees"),
+        ({"order_no": 4547, "missing_item": "Veg Thali", "refund_amount": 300}, "Sana Khan", (4547,),
+         "Veg Thali refunds can be 250, 500 rupees"),
         ({"order_no": 4512, "refund_amount": 40}, "Priya Sharma", (4512,), "needs missing_item"),
+        # Part 5 L1 (task 10): a caller who isn't the owner, on purpose and correctly.
+        ({"order_no": 4568, "order_owner": "Someone Else"}, "Rohit Gupta", (4568,), "belongs to 'Aman Gupta'"),
+        ({"order_no": 4568, "order_owner": "Aman Gupta"}, "Aman Gupta", (4568,), "only for a caller who isn't"),
+        # Part 5 L1 (tasks 11, 13): a second order of the same caller.
+        ({"order_no": 4521, "other_order_no": 4512}, "Rahul Verma", (4521, 4512), "belongs to 'Priya Sharma'"),
+        ({"order_no": 4521, "other_order_no": 4555}, "Rahul Verma", (4521,), "4555 is not in this task's uses"),
+        ({"order_no": 4521, "other_order_no": 4521}, "Rahul Verma", (4521,), "must be a different order"),
+        ({"order_no": 4521, "other_order_no": 9998}, "Rahul Verma", (4521, 9998), "9998 is not in the seed"),
+        ({"order_no": 4512, "new_address_order": 4561}, "Priya Sharma", (4512,), "needs new_address"),
+        ({"order_no": 4512, "new_address_order": 4561, "new_address": "X"}, "Priya Sharma", (4512,),
+         "must be order_no or other_order_no"),
+        ({"order_no": 4512, "other_order_no": 4561, "new_address_order": 4561,
+          "new_address": "House 7, Lane 3, Model Town, Ludhiana"}, "Priya Sharma", (4512, 4561),
+         "the address order 4561 already has"),
         (
             {"order_no": 4521, "new_address": "flat 12b, shanti apartments,  sector 21, noida"},
             "Rahul Verma", (4521,), "already has",

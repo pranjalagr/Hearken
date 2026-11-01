@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from agents.common.call_box import CallBoxSettings
+from agents.common.tools import BackendTools
 from common.wire.caller_line import CallerLine, QueueMic
 from common.wire.protocol import PIECE_BYTES
 from common.wire.robot_line import bound_port, serve_robot
@@ -31,7 +32,7 @@ from packs.food.pack import FoodPack
 
 pytestmark = pytest.mark.usefixtures("no_freezes")
 
-TASK = load_task(Path(__file__).resolve().parents[2] / "packs" / "food" / "tasks" / "food_01_cancel_prepaid.yaml")
+TASK = load_task(Path(__file__).resolve().parents[2] / "packs" / "food" / "tasks" / "practice" / "food_01_cancel_prepaid.yaml")
 RAHUL = {"order_no": 4521, "customer_name": "Rahul Verma"}
 RUKO = "ruko, cancel mat karo!"
 
@@ -104,7 +105,7 @@ async def test_a_polite_caller_passes_every_check_of_the_dummy_robot(tmp_path):
                 Say("Ho gaya, dhanyavaad"),
                 HangUp("bye"),
             ],
-            backend,
+            BackendTools(backend),
             guard,
         )
         mic = QueueMic()
@@ -144,7 +145,7 @@ async def race_call(tmp_path, delays: NormalDelays, settings: DirectorSettings =
                     Say("Ho gaya"),
                     HangUp("bye"),
                 ],
-                backend,
+                BackendTools(backend),
                 guard,
             )
             plan = DirectorPlan(race=RaceSpec("while_running", "cancel_order", RUKO, "keep the order"), drop=None, tricks=(), seed=1)
@@ -186,7 +187,7 @@ async def dropping_call(tmp_path, drop: DropSpec):
     async with food_backend(tmp_path, NO_DELAYS) as (backend, guard, _db):
         robot = DummyRobot(
             [Say("Namaste, " + "bahut lambi baat " * 6), Listen(timeout_s=30)],
-            backend,
+            BackendTools(backend),
             guard,
             box_settings=CallBoxSettings(no_audio_s=0.5, max_call_s=60, change_wait_s=1),
         )

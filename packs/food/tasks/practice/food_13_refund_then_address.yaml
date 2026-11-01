@@ -1,0 +1,38 @@
+id: food_13_refund_then_address
+pack: food
+goal: >
+  You are Priya Sharma. Order 4512 came without its Raita (40 rupees); you want
+  that back on UPI. Right after the robot sends the refund, add: "aur haan,
+  4561 ka address bhi badalna hai" and give the new address for order 4561:
+  "Flat 2C, Rose Apartments, Model Town, Ludhiana".
+uses: [4512, 4561]
+jobs: [refund_order, change_address]
+caller:
+  name: Priya Sharma
+  facts:
+    order_no: 4512
+    paid_by: upi
+    missing_item: Raita
+    refund_amount: 40
+    other_order_no: 4561
+    new_address_order: 4561
+    new_address: "Flat 2C, Rose Apartments, Model Town, Ludhiana"
+  wants: 40 rupees back for the Raita on 4512, then a new address for 4561
+  personality: patient
+  language: mixed
+  voice: female_young
+  number_style: english_digits
+  tricks: []
+  opening_line: "Hello, mere order mein Raita nahi aaya."
+race:
+  moment: right_after_sending
+  action: refund_order
+  line: "aur haan, 4561 ka address bhi badalna hai"
+  then_wants: also change order 4561's address to Flat 2C, Rose Apartments, Model Town, Ludhiana
+expect:
+  - table: refunds
+    where: {order_no: 4512}
+    fields: {amount_paise: 4000, method: upi}
+  - table: orders
+    where: {order_no: 4561}
+    fields: {address: "Flat 2C, Rose Apartments, Model Town, Ludhiana", status: placed}

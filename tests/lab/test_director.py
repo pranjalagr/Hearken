@@ -272,9 +272,30 @@ def test_drop_while_the_action_runs_and_after_the_robot_says_done():
 
 
 def test_after_a_drop_the_director_does_nothing_more():
+    # The drop comes at "saving"; the race would only fire at "saved", after it.
+    call = Call(race=race("saved_not_heard"), drop=DropSpec("while_action_runs", "silent"))
+    call.run(100, bells_at={20: [bell(SAVING)], 40: [bell(SAVED)]})
+    assert call.ticks_saying(RUKO) == [] and call.controls.calls == ["silent"]
+
+
+def test_ruko_while_saving_then_the_line_dies():
+    """Part 5 L1, task 15: both planned for the same moment, the race line
+    goes out first and the drop follows it; dropping at "saving" would cut
+    the "ruko" before it could play."""
     call = Call(race=race("while_running"), drop=DropSpec("while_action_runs", "silent"))
     call.run(100, bells_at={20: [bell(SAVING)]})
+    said = call.ticks_saying(RUKO)
+    assert said and call.controls.calls == ["silent"]
+    assert call.director.report.dropped.caller_ms == (said[-1] + 1) * 20  # right after its last piece
+    assert call.director.report.race.hit is True
+
+
+def test_ruko_missed_while_saving_drops_at_once():
+    """The save came before the race line was due: nothing left to wait for."""
+    call = Call(race=race("while_running"), drop=DropSpec("while_action_runs", "silent"))
+    call.run(100, bells_at={20: [bell(SAVING), bell(SAVED)]})
     assert call.ticks_saying(RUKO) == [] and call.controls.calls == ["silent"]
+    assert call.director.report.race.hit is False
 
 
 def test_the_same_seed_gives_the_same_call():

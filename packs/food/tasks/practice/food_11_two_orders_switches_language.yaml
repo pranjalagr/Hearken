@@ -1,0 +1,46 @@
+id: food_11_two_orders_switches_language
+pack: food
+goal: >
+  You are Rahul Verma. You have two orders: 4555 (a pizza, already delivered)
+  and 4521 (not here yet). Start in Hindi, then switch to English. Cancel the
+  one that hasn't come, not the pizza. If it goes quiet after you agree, ask
+  "Hello? Is it done?".
+uses: [4521, 4555]
+jobs: [find_order, cancel_order]
+caller:
+  name: Rahul Verma
+  facts:
+    order_no: 4521
+    other_order_no: 4555
+    paid_by: card
+  wants: cancel order 4521 (not the pizza, 4555) and get the money back on the card
+  personality: patient
+  language: mixed
+  voice: male_young
+  number_style: hindi_digits
+  tricks: [switches_language]
+  opening_line: "Hello, mere do order hain, ek cancel karna hai."
+switches:
+  # The cancel is saved, then its reply comes 3 s late (race moment 4).
+  - action: cancel_order
+    kind: slow
+    delay_at: after_save
+    seconds: 3
+race:
+  moment: saved_not_heard
+  action: cancel_order
+  line: "Hello? Is it done?"
+  then_wants: order 4521 cancelled with the money back on the card, only once
+expect:
+  - table: orders
+    where: {order_no: 4521}
+    fields: {status: cancelled}
+  - table: refunds
+    where: {order_no: 4521}
+    fields: {amount_paise: 45000, method: card}
+  - table: orders
+    where: {order_no: 4555}
+    fields: {status: delivered}
+  - table: refunds
+    where: {order_no: 4555}
+    count: 0

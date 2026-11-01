@@ -30,6 +30,7 @@ from agents.agent_c.talker.slots import UnknownSlot, fill_slots, stray_numbers, 
 from engine.contract.spoken import LANGUAGES, SpokenWords
 from lab.week1.flash_lite_check import (
     MODEL,
+    REQUEST_TIMEOUT_S,
     ROOT,
     STYLE_PROMPT,
     Reply,
@@ -152,13 +153,12 @@ def report(cases: list[MoneySituation], replies: list[Reply], when: datetime,
 
 
 async def run(out_dir: Path = ROOT / "runs" / "week1") -> tuple[Path, int, int]:
-    from google import genai
-
     from common.env import load_env, require
+    from common.google import google_client
 
     load_env()
     cases = load_money_situations()
-    client = genai.Client(api_key=require("GEMINI_API_KEY"))
+    client = google_client(require("GEMINI_API_KEY"), REQUEST_TIMEOUT_S)
     try:
         asks = [case.seen for case in cases for _ in range(TRIES)]
         replies = await ask_all(asks, gemini_asker(client, MODEL, STYLE_PROMPT.read_text(encoding="utf-8")))

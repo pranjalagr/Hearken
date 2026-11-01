@@ -22,3 +22,7 @@ lab/sounds/
 
 # Node writes these if anyone ever installs packages for the web phone.
 node_modules/
+
+# Part 5 L14: the exam tasks stay out of git until the final run, so nothing is
+# tuned on them by accident (Part 6). OneDrive keeps a backup.
+packs/food/tasks/exam/

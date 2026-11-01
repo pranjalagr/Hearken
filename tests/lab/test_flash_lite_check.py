@@ -88,8 +88,10 @@ async def test_too_many_requests_and_server_errors_are_retried():
             raise api_error(429 if len(calls) == 1 else 503)
         return "ok"
 
-    assert await with_retries(flaky, waits=(10, 20, 40), sleep=sleep) == "ok"
-    assert waited == [10, 20]
+    told = []
+    retried = lambda error, wait: told.append((error.code, wait))
+    assert await with_retries(flaky, waits=(10, 20, 40), sleep=sleep, on_retry=retried) == "ok"
+    assert waited == [10, 20] and told == [(429, 10), (503, 20)]  # every retry is told, never silent
 
 
 async def test_a_bad_key_fails_at_once_and_retries_have_an_end():
@@ -130,3 +132,48 @@ async def test_the_report_has_the_model_date_rule_and_one_row_per_situation():
     assert len(rows) == 20
     assert "Ji \\| zaroor" in rows[0]  # a | in a reply can't break the table
     assert "Errors:** 0" in text
+
+
+def api_error_saying(code, message):
+    return errors.APIError(code, {"error": {"code": code, "message": message, "status": "S"}})
+
+
+async def test_a_daily_limit_fails_at_once_and_a_short_asked_wait_is_honoured():
+    """On 1 Nov 2026 the judge check spent 60 s retrying a daily cap with 14 hours left."""
+    waited = []
+
+    async def sleep(seconds):
+        waited.append(seconds)
+
+    async def daily_cap():
+        raise api_error_saying(429, "Quota exceeded. Please retry in 14h34m57.7s.")
+
+    with pytest.raises(errors.APIError):
+        await with_retries(daily_cap, waits=(10, 20), sleep=sleep)
+    assert waited == []
+
+    calls = []
+
+    async def per_minute():
+        calls.append(1)
+        if len(calls) == 1:
+            raise api_error_saying(429, "Please retry in 54s.")
+        return "ok"
+
+    assert await with_retries(per_minute, waits=(10, 20), sleep=sleep) == "ok"
+    assert waited == [54]  # our 10 s would only have failed again
+
+
+async def test_a_stuck_request_is_tried_again():
+    waited, calls = [], []
+
+    async def sleep(seconds):
+        waited.append(seconds)
+
+    async def stuck_once():
+        calls.append(1)
+        if len(calls) == 1:
+            raise TimeoutError  # what the async Google client raises at its time limit
+        return "ok"
+
+    assert await with_retries(stuck_once, waits=(10,), sleep=sleep) == "ok" and waited == [10]

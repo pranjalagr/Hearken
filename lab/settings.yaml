@@ -1,0 +1,45 @@
+# Every number of the test lab (Part 5, L14). Starting guesses from the
+# decisions named next to each; change them here, never in code. A copy of
+# this file goes into every run's run.json, so an old run keeps meaning what
+# it meant.
+
+# L3 / C17: how many calls run at once. Start at 5, grow toward 20 only while
+# the busy-lab check stays green.
+calls_at_once: 5
+
+# L3: how long a robot program may take to say "ready" before it counts as
+# never answering (a robot failure, L4).
+robot_ready_timeout_s: 30.0
+
+# Decision 14: the robot's call box. Lab runs pass these to every robot.
+robot_no_audio_s: 30.0
+robot_max_call_s: 900.0
+robot_change_wait_s: 10.0
+
+# L4: at most this many reruns of a call for lab problems; more stops the batch.
+max_reruns: 2
+# L13: more than this share of lab problems in a batch flags it.
+lab_problem_share_flag: 0.05
+
+# L4 / decision 14: an event loop late by more than this is our laptop
+# falling behind (a lab problem), not the robot.
+freeze_limit_ms: 100
+
+# L9: "sound" means louder than this (RMS, 1.0 = full scale; about -40 dBFS).
+sound_level: 0.01
+# L9: a robot "stopped for ruko" if its sound ends within this long.
+stop_within_s: 1.0
+# L9: after a "haan haan", a robot quiet for this long has stopped (a wrong stop).
+wrong_stop_quiet_s: 1.0
+
+# C17: 20 calls at once must give the same timings as 1 call, within this.
+busy_lab_tolerance_ms: 50
+
+# L11: the longest one judge request may take. The judge thinks before it
+# answers and runs after the call, so it gets far longer than a live reply;
+# without a limit a stuck request hung a judge check for 11 minutes (1 Nov 2026).
+judge_timeout_s: 120.0
+
+# L12: reshuffling rounds for every 95% range, and its seed (same seed, same range).
+reshuffle_rounds: 10000
+reshuffle_seed: 1

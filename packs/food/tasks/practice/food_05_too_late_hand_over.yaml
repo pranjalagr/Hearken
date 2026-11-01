@@ -4,6 +4,7 @@ goal: >
   You are Vikram Rao. You want to cancel order 4540, but it is already out for
   delivery. When you hear that, you insist on talking to a person.
 uses: [4540]
+jobs: [cancel_order, hand_over_to_human]
 caller:
   name: Vikram Rao
   facts:
@@ -14,7 +15,7 @@ caller:
   language: mostly_hindi
   voice: male_older
   number_style: hindi_pairs
-  tricks: []
+  tricks: [goes_silent]
   opening_line: "Haan ji, mera order cancel karwana hai."
 expect:
   - table: orders

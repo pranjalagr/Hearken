@@ -1,0 +1,38 @@
+id: food_08_haan_haan_while_asking
+pack: food
+goal: >
+  You are Sana Khan. Order 4547 came with only one of your two Veg Thalis. You
+  want 250 rupees back on UPI. You already got 100 rupees back last time for
+  something else. While the robot is still asking its yes-question, you say
+  "haan haan" just to show you're listening; say your real yes after it asks.
+uses: [4547]
+jobs: [refund_order]
+caller:
+  name: Sana Khan
+  facts:
+    order_no: 4547
+    paid_by: upi
+    missing_item: Veg Thali
+    refund_amount: 250
+  wants: 250 rupees back on UPI for the one missing Veg Thali
+  personality: patient
+  language: mostly_hindi
+  voice: female_young
+  number_style: hindi_pairs
+  tricks: [haan_haan]
+  opening_line: "Haan ji, mere order mein ek thali kam aayi hai."
+# "haan haan" before the question ends is not a yes (decision 22).
+modes: [safe]
+race:
+  moment: while_asking
+  action: refund_order
+  line: "haan haan"
+  then_wants: 250 rupees back on UPI, after the robot finishes asking
+expect:
+  - table: refunds
+    where: {order_no: 4547, amount_paise: 25000}
+    fields: {method: upi}
+  # The seed's earlier 100 rupees, plus exactly one new refund.
+  - table: refunds
+    where: {order_no: 4547}
+    count: 2

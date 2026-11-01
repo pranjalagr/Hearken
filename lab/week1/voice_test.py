@@ -28,10 +28,8 @@ from __future__ import annotations
 import base64
 import html
 import json
-import re
 import statistics
 import time
-import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -39,11 +37,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import httpx
 import yaml
 
 from common.audio.pcm import float_to_pcm16, pcm16_to_float
 from common.audio.resample import PHONE_RATE, resample
+from common.retry import asked_wait_s, asks_too_long, worth_retrying
 
 ROOT = Path(__file__).resolve().parents[2]
 LINES = Path(__file__).with_name("voice_lines.yaml")
@@ -94,11 +92,6 @@ SETUPS_BY_NAME = {setup.name: setup for setup in SETUPS}
 # Pacing: Google's free tier counts requests per minute; Sarvam is gentler.
 PAUSE_S = {"google": 6.0, "sarvam": 0.5}
 RETRY_WAITS_S = (15.0, 30.0, 60.0)
-# The longest wait a service may ask for before a retry. A per-minute limit
-# asks under a minute ("retry in 54s"); a daily one asks hours ("retry in
-# 24h23m46s"), and waiting through 3 retries of every clip for that only
-# wasted 105 s each on 1 Nov 2026.
-MAX_ASKED_WAIT_S = 120.0
 # The longest wait for the next bytes of a reply. A normal first sound comes
 # in under 7 s, so past this the request is stuck, not slow. Without it, one
 # stuck Google request froze the 1 Nov screening run for 19 minutes: the
@@ -186,30 +179,6 @@ def sarvam_speak(
 GOOGLE_STREAM_RATE = 24000
 
 
-def google_client(key: str, http_client: httpx.Client | None = None) -> Any:
-    """The Google client, with a time limit and no retries of its own.
-
-    Checked against the library (2.34) with a fake network, 1 Nov 2026:
-    - by default it never times out, and quietly retries a 503 three times
-      (4 requests, 6 s of hidden waiting) that would count as a slow first
-      sound;
-    - its retry setting can't say "never" for interactions: attempts=0 is
-      turned into 1, which the interactions client reads as one retry.
-    So retries are switched off on the interactions client itself, and left
-    to with_retries, which restarts the clock and logs each one.
-    http_client lets tests put a fake network under the real library."""
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(
-        api_key=key,
-        http_options=types.HttpOptions(timeout=int(REQUEST_TIMEOUT_S * 1000), httpx_client=http_client),
-    )
-    # The interactions client reads this on every call; None means never retry.
-    client.interactions.sdk_configuration.retry_config = None
-    return client
-
-
 def google_speak(setup: Setup, line: VoiceLine, client: Any, clock: Callable[[], float] = time.perf_counter) -> Spoken:
     start = clock()
     first_s: float | None = None
@@ -246,70 +215,6 @@ def google_speak(setup: Setup, line: VoiceLine, client: Any, clock: Callable[[],
 
 
 # ---- running the test -----------------------------------------------------------
-
-
-def timed_out(error: BaseException) -> bool:
-    """A stuck request, from either service. Each one hides the timeout
-    inside another error, so the chain of causes is followed:
-    - urllib (Sarvam) raises TimeoutError, or URLError around it when connecting;
-    - the Google library raises its own private APITimeoutError around
-      httpx's TimeoutException, both before the reply and mid-stream."""
-    seen: set[int] = set()
-    while error is not None and id(error) not in seen:
-        seen.add(id(error))
-        if isinstance(error, (TimeoutError, httpx.TimeoutException)):
-            return True
-        if isinstance(error, urllib.error.URLError) and isinstance(error.reason, TimeoutError):
-            return True
-        error = error.__cause__ or error.__context__
-    return False
-
-
-def http_status(error: BaseException) -> int | None:
-    """urllib (Sarvam) keeps the HTTP status in .code; the Google library in
-    .status_code (its errors have no .code: a hand-made stand-in with .code
-    hid this until the real library was tested)."""
-    for name in ("status_code", "code"):
-        value = getattr(error, name, None)
-        if isinstance(value, int):
-            return value
-    return None
-
-
-def worth_retrying(error: BaseException) -> bool:
-    """Too many requests (429), a server error (5xx) or a stuck request: wait
-    and try again. Anything else (a wrong voice name, a bad key) fails at once."""
-    if timed_out(error):
-        return True
-    status = http_status(error)
-    return status is not None and (status == 429 or status >= 500)
-
-
-# Google's free tier says how long to wait in words, inside the error text:
-# "Please retry in 24h23m46s" or "Please retry in 54s" (seen 1 Nov 2026).
-_RETRY_IN = re.compile(r"retry in (?=\d)(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?", re.IGNORECASE)
-
-
-def asked_wait_s(error: BaseException) -> float | None:
-    """How long the service itself asks us to wait, if it says: the standard
-    Retry-After header (in seconds), else Google's "retry in 24h23m46s"."""
-    # urllib's HTTPError keeps headers on itself; the Google library's errors on .response.
-    for source in (error, getattr(error, "response", None)):
-        headers = getattr(source, "headers", None)
-        value = headers.get("Retry-After") if hasattr(headers, "get") else None
-        if value is not None and str(value).strip().isdigit():
-            return float(value)
-    match = _RETRY_IN.search(str(error))
-    if match is None or not any(match.groups()):
-        return None
-    hours, minutes, seconds = (float(part or 0) for part in match.groups())
-    return hours * 3600 + minutes * 60 + seconds
-
-
-def asks_too_long(error: BaseException) -> bool:
-    """A daily limit, not a per-minute one: no retry here can outlast it."""
-    asked = asked_wait_s(error)
-    return asked is not None and asked > MAX_ASKED_WAIT_S
 
 
 def with_retries(

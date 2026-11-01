@@ -5,6 +5,7 @@ goal: >
   sister's place, so change the address to
   "Flat 2C, Rose Apartments, Model Town, Ludhiana".
 uses: [4561]
+jobs: [change_address]
 caller:
   name: Priya Sharma
   facts:

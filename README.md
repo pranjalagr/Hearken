@@ -38,7 +38,7 @@ go to `runs/` here; if OneDrive ever locks one ("database is locked"), pass
 
 ```powershell
 # make a fresh call copy from a task (prints its path)
-python -m cli.make_call --task packs/food/tasks/food_01_cancel_prepaid.yaml --mode safe
+python -m cli.make_call --task packs/food/tasks/practice/food_01_cancel_prepaid.yaml --mode safe
 
 # serve that call's tools over MCP (stdio), for an agent to connect to
 python -m cli.serve_call --db <printed path>
@@ -87,6 +87,33 @@ Reports, clips and listening pages go to `runs/week1/` (not in git). The voice
 test skips clips it already made, so a run stopped by a daily limit carries on
 where it left off.
 
+### The test lab (Part 5)
+
+```powershell
+# check the lab itself before trusting its numbers (green/red lights)
+python -m cli.lab_run health --quick       # ~1 minute, before every batch
+python -m cli.lab_run health               # before any official run
+
+# run calls: every practice task, robots started as their own programs
+python -m cli.lab_run run --robots puppet:perfect,puppet:careless
+
+# re-mark an old run from its folder alone (free: no new calls)
+python -m cli.lab_run rescore runs/lab/<run folder>
+
+# the AI judge (needs GEMINI_API_KEY): check it on planted mistakes, then mark a run
+python -m cli.lab_run judge-check
+python -m cli.lab_run judge runs/lab/<run folder>
+```
+
+The puppet robots play every practice task perfectly or carelessly, so the
+lab's own answers are known before a call is made. Each run gets a folder
+under `runs/lab/` (not in git): `run.json` (what ran, with a copy of every
+setting), `calls/<call>/` (both sides of the black box and its `score.json`),
+`results.md`, and `health.md`. Every lab number is in `lab/settings.yaml`.
+
+Run nothing else heavy while the lab runs: its freeze check rightly counts a
+busy laptop as a lab problem, and reruns those calls.
+
 ## The wire
 
 One WebSocket per call. Audio goes as binary frames, each exactly one 20 ms
@@ -119,9 +146,12 @@ engine/                 knows nothing about any business
   records/              the action log
   service/              backend (front desk), tool catalog, replies, MCP server
   tasks/                task files (with the caller: section): load, set up a call, check the result
+                        (nothing else may change), the business records, the coverage grid
 packs/
-  food/                 the food-delivery pack: tables, seed, rules, actions, tasks,
-                        caller-fact checks, and spoken.yaml (ready phrases said out loud)
+  food/                 the food-delivery pack: tables, seed, rules, actions, caller-fact
+                        checks, and spoken.yaml (ready phrases said out loud)
+    tasks/practice/     the 15 practice tasks
+    tasks/exam/         the exam tasks: kept out of git until the final run
   toy/                  a tiny pack used only to prove the engine works without food
   registry.py           the only place that lists every pack
 common/                 shared by robots and callers
@@ -129,15 +159,28 @@ common/                 shared by robots and callers
   audio/                PCM, resampling, phone sound, background noise, sound files
   stopwatch.py          time stamps for every step of a call
   env.py                reads the keys in .env, never printing one
+  google.py             the Google AI client: always a time limit, never hidden retries
+  retry.py              when to try an outside service again (and when a daily limit means stop)
 agents/
   common/call_box.py    one box per call: ends cleanly, shields a change already sent
+  common/diary.py       the robot's diary (robot.jsonl): what it heard, said, used, decided
+  common/tools.py       how a robot reaches its tools: MCP to its own copy, or in-process for tests
   agent_c/talker/       the Talker's style prompt, and its [amount] slots and number check
 lab/
   week1/                the week-1 checks: Talker replies, amounts, voices
+  settings.yaml         every number of the test lab, in one place
+  runner/               starts each call (the robot as its own program), batches, reruns
+  recorder/             the caller's side of the black box, and the clock map
+  scorer/               marks a call from its folder: task done, harm, timing, numbers
+  judge/                the AI judge: its rule sheet, answer form, and planted mistakes
+  results/              the results table and its 95% ranges
+  health/               the lab's green/red health check
+  puppets/              each task's perfect and careless robot, and the caller's lines
   bell_board.py         where backends ring their bells for the director
   caller/director/      exact-moment race lines, tricks and drop tests
+  caller/scripted.py    a scripted caller brain, for lab runs with puppets
   caller/mouth/         the caller's number words (kept apart from any robot code)
-  dummy_robot/          the puppet robot (fixed script) and the echo robot
+  dummy_robot/          the puppet robot (fixed script), the echo robot, a crashing robot
   web_phone/            the browser phone (its logic is tested with Node)
   synthetic_voice.py    a stand-in voice until the real ones are picked
 cli/                    command-line entry points
@@ -148,7 +191,8 @@ tests/
   common/               the wire (parts and real calls), audio, stopwatch, freeze check, .env
   agents/               the call box, the Talker's slots
   lab/                  bells, director, dummy robot, whole lab calls, number words, web phone,
-                        and the week-1 checks (offline: fake networks, no keys needed)
+                        the week-1 checks (offline: fake networks, no keys needed), and the
+                        test lab: scorer, judge, results, health, and real puppet runs
 ```
 
 Tests that run live audio also check that the event loop never freezes for

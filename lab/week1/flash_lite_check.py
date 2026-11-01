@@ -25,6 +25,8 @@ from typing import Any
 
 import yaml
 
+from common.retry import asked_wait_s, asks_too_long, worth_retrying
+
 ROOT = Path(__file__).resolve().parents[2]
 SITUATIONS = Path(__file__).with_name("talker_situations.yaml")
 STYLE_PROMPT = ROOT / "agents" / "agent_c" / "talker" / "prompts" / "style.md"
@@ -40,6 +42,9 @@ MAX_OUTPUT_TOKENS = 200
 # calls are spaced to stay under about 13 a minute; retries remain a backstop.
 PAUSE_S = 4.5
 RETRY_WAITS_S = (10.0, 20.0, 40.0)
+# A short reply with minimal thinking comes in seconds; without a limit the
+# library would wait on a stuck request forever (see common/google.py).
+REQUEST_TIMEOUT_S = 30.0
 
 SPEAKERS = {"caller": "Caller", "robot": "You"}
 
@@ -139,17 +144,22 @@ async def with_retries(
     call: Callable[[], Awaitable[Any]],
     waits: tuple[float, ...] = RETRY_WAITS_S,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    on_retry: Callable[[BaseException, float], None] | None = None,
 ) -> Any:
-    """Retry "too many requests" (429) and server errors (5xx); anything
-    else, like a bad key (400/403), is a real problem and fails at once."""
-    from google.genai import errors
-
+    """The shared rules (common/retry.py): too many requests, a server error
+    or a stuck request is tried again, after the wait the service asks for if
+    that is longer; a daily limit or a bad key fails at once.
+    on_retry(error, wait) is told of each retry: silent retries hid where a
+    judge check's 8 minutes went (1 Nov 2026)."""
     for wait in (*waits, None):
         try:
             return await call()
-        except errors.APIError as exc:
-            if wait is None or not (exc.code == 429 or (exc.code or 0) >= 500):
+        except Exception as error:
+            if wait is None or not worth_retrying(error) or asks_too_long(error):
                 raise
+            wait = max(wait, asked_wait_s(error) or 0.0)
+            if on_retry:
+                on_retry(error, wait)
             await sleep(wait)
     raise AssertionError("unreachable")
 
@@ -219,12 +229,11 @@ def _cell(text: str) -> str:
 
 
 async def run(out_dir: Path = ROOT / "runs" / "week1") -> tuple[Path, list[Reply]]:
-    from google import genai
-
     from common.env import load_env, require
+    from common.google import google_client
 
     load_env()
-    client = genai.Client(api_key=require("GEMINI_API_KEY"))
+    client = google_client(require("GEMINI_API_KEY"), REQUEST_TIMEOUT_S)
     try:
         replies = await ask_all(load_situations(), gemini_asker(client, MODEL, STYLE_PROMPT.read_text(encoding="utf-8")))
     finally:

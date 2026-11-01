@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
 
+from common.stopwatch import Stopwatch
 from engine.contract.action import Action, ActionContext, clean_inputs
 from engine.contract.pack import Pack
 from engine.contract.spoken import LANGUAGES
@@ -47,6 +48,9 @@ class Backend:
         lifetimes: Lifetimes = Lifetimes(),
         sleep: Sleep = asyncio.sleep,  # tests can pass a fake to skip real waiting
         bells: BellLine = NO_BELLS,  # the lab's director listens here (Part 3, C10)
+        # Part 5, L9: when each tool call starts and ends, on the one shared
+        # clock, so the scorer can measure the silence while a tool runs.
+        stopwatch: Stopwatch | None = None,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -54,6 +58,7 @@ class Backend:
         self._lifetimes = lifetimes
         self._sleep = sleep
         self._bells = bells
+        self._stopwatch = stopwatch
         self._actions = {action.name: action for action in pack.actions()}
         _check_action_names(self._actions)
         # Read once per call: a bad file then fails when the call starts, not
@@ -73,6 +78,12 @@ class Backend:
     async def call_tool(self, tool: str, inputs: dict[str, Any] | None = None) -> ToolReply:
         """The single entry point for every tool call, from MCP or from tests."""
         inputs = inputs or {}
+        if self._stopwatch is None:
+            return await self._call(tool, inputs)
+        with self._stopwatch.span("tool", tool=tool):
+            return await self._call(tool, inputs)
+
+    async def _call(self, tool: str, inputs: dict[str, Any]) -> ToolReply:
         try:
             return await self._route(tool, inputs)
         except Exception as exc:

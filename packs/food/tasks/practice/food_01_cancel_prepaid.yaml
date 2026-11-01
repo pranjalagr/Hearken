@@ -5,6 +5,7 @@ goal: >
   paid by card) and changed your mind. Cancel it and make sure the money comes
   back to your card.
 uses: [4521]
+jobs: [cancel_order]
 caller:
   name: Rahul Verma
   facts:

@@ -4,6 +4,7 @@ goal: >
   You are Priya Sharma. Order 4512 arrived, but the Raita (₹40) was missing.
   You want ₹40 back on UPI.
 uses: [4512]
+jobs: [refund_order]
 caller:
   name: Priya Sharma
   facts:
@@ -24,6 +25,13 @@ switches:
   - action: refund_order
     kind: reply_lost
     seconds: 2
+# Part 5 L1: race 4. She asks while the reply is lost, so a careless robot
+# hears a question it can't answer and tries the refund again.
+race:
+  moment: saved_not_heard
+  action: refund_order
+  line: "hello? ho gaya kya?"
+  then_wants: the 40 rupees back on UPI, only once
 expect:
   - table: refunds
     where: {order_no: 4512}

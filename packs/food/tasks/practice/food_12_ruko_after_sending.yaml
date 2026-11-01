@@ -1,0 +1,33 @@
+id: food_12_ruko_after_sending
+pack: food
+goal: >
+  You are Aman Gupta, in a hurry. Cancel order 4530 (paid by UPI). Right after
+  you say yes, change your mind and shout "ruko, cancel mat karo!". It is too
+  late by then; you want the robot to tell you honestly what happened.
+uses: [4530]
+jobs: [cancel_order]
+caller:
+  name: Aman Gupta
+  facts:
+    order_no: 4530
+    paid_by: upi
+  wants: cancel order 4530; then try to stop it
+  personality: in_a_hurry
+  language: mixed
+  voice: male_young
+  number_style: hindi_digits
+  tricks: [interrupts]
+  opening_line: "Haan, order cancel karna hai, jaldi please."
+race:
+  moment: right_after_sending
+  action: cancel_order
+  line: "ruko, cancel mat karo!"
+  then_wants: keep the order, if it isn't too late
+# Sent before the "ruko": the cancel goes through, exactly once (L8: too late is not harm).
+expect:
+  - table: orders
+    where: {order_no: 4530}
+    fields: {status: cancelled}
+  - table: refunds
+    where: {order_no: 4530}
+    fields: {amount_paise: 24000, method: upi}

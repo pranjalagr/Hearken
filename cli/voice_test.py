@@ -19,12 +19,13 @@ from __future__ import annotations
 import argparse
 
 from common.env import load_env, require
+from common.google import google_client
 from lab.week1.voice_test import (
     OUT_DIR,
+    REQUEST_TIMEOUT_S,
     SCREEN_IDS,
     SETUPS,
     SETUPS_BY_NAME,
-    google_client,
     google_speak,
     load_lines,
     run_round,
@@ -45,7 +46,7 @@ def main(round_name: str | None, line_ids: list[str] | None, voice_names: list[s
     label = "lines" if line_ids else round_name
     setups = [SETUPS_BY_NAME[name] for name in voice_names] if voice_names else list(SETUPS)
     sarvam_key = require("SARVAM_API_KEY")
-    client = google_client(require("GEMINI_API_KEY"))
+    client = google_client(require("GEMINI_API_KEY"), REQUEST_TIMEOUT_S)
 
     def speak(setup, line):
         if setup.company == "sarvam":

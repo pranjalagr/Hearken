@@ -1,0 +1,28 @@
+id: food_09_cash_cancel_yes_with_condition
+pack: food
+goal: >
+  You are Neha Singh. Cancel order 4533 (cash on delivery). When asked to
+  confirm, say "haan, lekin SMS aayega na?". The robot can't promise an SMS;
+  once it has answered, give a clean yes.
+uses: [4533]
+jobs: [cancel_order]
+caller:
+  name: Neha Singh
+  facts:
+    order_no: 4533
+    paid_by: cash
+  wants: cancel order 4533
+  personality: elderly
+  language: mostly_hindi
+  voice: female_older
+  number_style: hindi_pairs
+  tricks: [yes_with_condition]
+  opening_line: "Haan ji, mujhe apna order cancel karna hai."
+# Paid in cash, so nothing comes back: no refund row may appear.
+expect:
+  - table: orders
+    where: {order_no: 4533}
+    fields: {status: cancelled}
+  - table: refunds
+    where: {order_no: 4533}
+    count: 0

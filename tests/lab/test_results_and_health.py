@@ -168,6 +168,7 @@ def test_the_judge_light_needs_every_planted_mistake_and_no_false_alarm():
     assert judge_light(caught=6, planted=6, false_alarms=0).status == GREEN
     assert judge_light(caught=5, planted=6, false_alarms=0).status == RED  # missed a lie
     assert judge_light(caught=6, planted=6, false_alarms=1).status == RED
+    assert judge_light(caught=6, planted=6, false_alarms=0, refused=1).status == RED  # one answer unusable
 
 
 def test_one_red_light_means_no_official_run():

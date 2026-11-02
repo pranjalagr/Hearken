@@ -3,8 +3,10 @@
     python -m cli.lab_run run --robots puppet:perfect,puppet:careless [--repeats 1] [--at-once 5] [--label x]
     python -m cli.lab_run health [--quick]
     python -m cli.lab_run rescore runs/lab/<run folder>
-    python -m cli.lab_run judge-check            (the judge on planted mistakes, twice; needs GEMINI_API_KEY)
-    python -m cli.lab_run judge runs/lab/<run folder>   (the judge marks a run's calls)
+    python -m cli.lab_run judge-check [--judge gemini]   (the judge on planted mistakes, twice)
+    python -m cli.lab_run judge runs/lab/<run folder> [--judge gemini]   (the judge marks a run's calls)
+
+The judge needs GROQ_API_KEY (groq, the default) or GEMINI_API_KEY (gemini) in .env.
 
 Every run gets its own folder under runs/lab/ (not in git): run.json (what
 was run, with copies of every setting), calls/<call>/ (the black box and its
@@ -15,14 +17,19 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import json
 import sys
 import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 
+from common.env import load_env, require
 from common.retry import http_status
 from engine.tasks.task_file import load_task, load_tasks
 from lab.health.run_health import run_health
+from lab.judge.judge import Ask, paced
 from lab.puppets.food import PUPPETS, Careless, script_for
 from lab.results.table import compare, results_markdown, summarize
 from lab.runner.batch import make_run_dir, plan_calls, run_batch, write_run_json
@@ -81,21 +88,56 @@ async def rescore(run_dir: Path) -> None:
     _write_results(run_dir, scores, settings, {"Re-marked calls": len(scores)})
 
 
-def _gemini(timeout_s: float):
-    from common.env import load_env, require
+@dataclass
+class Judge:
+    """A ready judge: how to ask it, its model (kept with every mark), and how to close its client."""
+
+    ask: Ask
+    model: str
+    close: Callable[[], Awaitable[None]]
+
+
+def _gemini_judge(timeout_s: float, on_retry, on_usage) -> Judge:
     from common.google import google_client
+    from lab.judge.judge import GEMINI_MODEL, gemini_judge
 
+    client = google_client(require("GEMINI_API_KEY"), timeout_s)
+    return Judge(gemini_judge(client, on_retry=on_retry), GEMINI_MODEL, client.aio.aclose)
+
+
+def _groq_judge(timeout_s: float, on_retry, on_usage) -> Judge:
+    from common.groq import groq_client
+    from lab.judge.judge import GROQ_MODEL, groq_judge
+
+    client = groq_client(require("GROQ_API_KEY"), timeout_s)
+    return Judge(groq_judge(client, on_retry=on_retry, on_usage=on_usage), GROQ_MODEL, client.aclose)
+
+
+JUDGES = {"gemini": _gemini_judge, "groq": _groq_judge}
+
+
+def _make_judge(name: str) -> Judge:
+    """The chosen judge, with every retry and token count printed as it happens."""
     load_env()
-    return google_client(require("GEMINI_API_KEY"), timeout_s)
+
+    def retrying(error: BaseException, wait: float) -> None:
+        said = http_status(error) or type(error).__name__
+        print(f"  {name} said {said}; asking again in {wait:.0f} s", flush=True)
+
+    def used(usage: dict) -> None:
+        print(f"  used {usage.get('total_tokens', '?')} tokens", flush=True)
+
+    settings = load_settings()
+    judge = JUDGES[name](settings.judge_timeout_s, retrying, used)
+    return dataclasses.replace(judge, ask=paced(judge.ask, settings.judge_gap_s))
 
 
-async def judge_check() -> tuple[dict, Path]:
+async def judge_check(name: str) -> tuple[dict, Path]:
     """L11: the judge on the planted calls, run twice for steadiness."""
     from lab.health.check import judge_light
     from lab.judge.check import changed_share, judge_report, run_planted
-    from lab.judge.judge import gemini_judge
 
-    client = _gemini(load_settings().judge_timeout_s)
+    judge = _make_judge(name)
     started = time.perf_counter()
 
     def show(run: int):
@@ -103,35 +145,29 @@ async def judge_check() -> tuple[dict, Path]:
             print(f"run {run}, case {number}/{total}: {case_id} ({time.perf_counter() - started:.0f} s in)", flush=True)
         return on_case
 
-    def retrying(error: BaseException, wait: float) -> None:
-        said = http_status(error) or type(error).__name__
-        print(f"  Google said {said}; asking again in {wait:.0f} s", flush=True)
-
     try:
-        ask = gemini_judge(client, on_retry=retrying)
-        graded, first = await run_planted(ask, on_case=show(1))
-        _again, second = await run_planted(ask, on_case=show(2))
+        graded, first = await run_planted(judge.ask, on_case=show(1))
+        _again, second = await run_planted(judge.ask, on_case=show(2))
     finally:
-        await client.aio.aclose()
-    report = judge_report(graded, changed_share(first, second))
-    folder = make_run_dir(RUNS, "judge-check")
-    light = judge_light(graded.caught, graded.planted, len(graded.false_alarms))
+        await judge.close()
+    report = {"model": judge.model, **judge_report(graded, changed_share(first, second))}
+    folder = make_run_dir(RUNS, f"judge-check-{name}")
+    light = judge_light(graded.caught, graded.planted, len(graded.false_alarms), len(graded.refused))
     report["light"] = {"status": light.status, "detail": light.detail}
     (folder / "judge.json").write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding="utf-8")
     return report, folder
 
 
-async def judge_a_run(run_dir: Path) -> None:
+async def judge_a_run(run_dir: Path, name: str) -> None:
     from lab.judge.apply import judge_run
-    from lab.judge.judge import gemini_judge
 
     settings = load_settings()
-    client = _gemini(settings.judge_timeout_s)
+    judge = _make_judge(name)
     try:
-        scores = await judge_run(run_dir, gemini_judge(client), settings)
+        scores = await judge_run(run_dir, judge.ask, settings, judge.model)
     finally:
-        await client.aio.aclose()
-    _write_results(run_dir, scores, load_settings(), {"Judged calls": len(scores)})
+        await judge.close()
+    _write_results(run_dir, scores, settings, {"Judged calls": len(scores), "Judge": judge.model})
 
 
 def main() -> None:
@@ -146,9 +182,14 @@ def main() -> None:
     health.add_argument("--quick", action="store_true")
     again = commands.add_parser("rescore", help="re-mark an old run")
     again.add_argument("folder")
-    commands.add_parser("judge-check", help="check the judge on planted mistakes")
+    checked = commands.add_parser("judge-check", help="check the judge on planted mistakes")
     judged = commands.add_parser("judge", help="the judge marks a run's calls")
     judged.add_argument("folder")
+    for command in (checked, judged):
+        # Groq's gpt-oss-120b: caught 6 of 6 planted mistakes with no false alarm and
+        # no change between two runs (1 Nov 2026); Gemini 3.8 Flash's free tier
+        # (20 requests a day) can't run one judge check.
+        command.add_argument("--judge", choices=sorted(JUDGES), default="groq")
     args = parser.parse_args()
     for name in getattr(args, "robots", "").split(","):
         if name and name not in ROBOTS:
@@ -162,12 +203,12 @@ def main() -> None:
         print(f"report: {outcome.run_dir / 'health.md'}")
         sys.exit(0 if outcome.report.all_green else 1)
     elif args.command == "judge-check":
-        report, folder = asyncio.run(judge_check())
+        report, folder = asyncio.run(judge_check(args.judge))
         print(json.dumps(report, indent=1, ensure_ascii=False))
         print(f"report: {folder / 'judge.json'}")
         sys.exit(0 if report["light"]["status"] == "green" else 1)
     elif args.command == "judge":
-        asyncio.run(judge_a_run(Path(args.folder)))
+        asyncio.run(judge_a_run(Path(args.folder), args.judge))
         print(f"results: {Path(args.folder) / 'results.md'}")
     else:
         asyncio.run(rescore(Path(args.folder)))

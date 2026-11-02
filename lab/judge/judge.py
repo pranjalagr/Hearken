@@ -13,16 +13,30 @@ to a person, never counted as a lie.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from lab.scorer.call_record import CallRecord
 
 RULES = Path(__file__).with_name("rules.md")
-MODEL = "gemini-3.8-flash"
+GEMINI_MODEL = "gemini-3.8-flash"
+# OpenAI's open reasoning model on Groq: free (about 1,000 requests and
+# 200,000 tokens a day, Nov 2026), and from another company than the robot's
+# Talker (Gemini), so the judge doesn't share the robot's blind spots.
+GROQ_MODEL = "openai/gpt-oss-120b"
+# The judge runs after the call, so it can take its time: think the most.
+GROQ_EFFORT = "high"
+# Strict mode still, now and then, answers "Failed to validate JSON" with an
+# empty answer (1 Nov 2026, right after a rate-limit wait); the same request
+# worked when sent again. So it is asked up to this many times in all.
+GROQ_TRIES = 3
 VERDICTS = ("true", "false", "unsupported", "cant_tell")
 FALSE = ("false", "unsupported")  # both are claims the robot had no right to make
 
@@ -169,7 +183,7 @@ async def judge(packet: Packet, ask: Ask) -> Marks:
     return check_answer(packet, answer)
 
 
-def gemini_judge(client: Any, model: str = MODEL, on_retry: Callable[[BaseException, float], None] | None = None) -> Ask:
+def gemini_judge(client: Any, model: str = GEMINI_MODEL, on_retry: Callable[[BaseException, float], None] | None = None) -> Ask:
     """The real judge: Gemini, answering in the form, allowed to think (it
     runs after the call, so the client's time limit, the lab's
     judge_timeout_s, is far longer than a live reply's)."""
@@ -188,3 +202,90 @@ def gemini_judge(client: Any, model: str = MODEL, on_retry: Callable[[BaseExcept
             raise BadAnswer(f"not JSON: {exc}") from exc
 
     return ask
+
+
+def strict_form(schema: dict[str, Any]) -> dict[str, Any]:
+    """The answer form in strict mode's dialect (Groq): every object closed
+    to extra fields and every field required. The form itself stays as it
+    is, for Gemini."""
+    if not isinstance(schema, dict):
+        return schema
+    strict = {key: strict_form(value) if isinstance(value, dict) else value for key, value in schema.items()}
+    if "properties" in strict:
+        strict["properties"] = {name: strict_form(field) for name, field in schema["properties"].items()}
+    if strict.get("type") == "object":
+        strict["additionalProperties"] = False
+        strict["required"] = list(strict.get("properties", {}))
+    return strict
+
+
+def groq_judge(client: Any, model: str = GROQ_MODEL, effort: str = GROQ_EFFORT,
+               on_retry: Callable[[BaseException, float], None] | None = None,
+               on_usage: Callable[[dict[str, Any]], None] | None = None,
+               sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> Ask:
+    """The judge on Groq: strict mode makes the answer match the form, and
+    the model's own reasoning is left out of the reply (only the form comes
+    back). on_usage hears each reply's token counts: the free tier's daily
+    token cap, not its request cap, is what runs out first. sleep is the
+    retry wait (tests pass a fake one)."""
+    from lab.week1.flash_lite_check import with_retries
+
+    form = {"type": "json_schema", "json_schema": {"name": "judge_marks", "strict": True, "schema": strict_form(FORM)}}
+
+    async def ask(rules: str, text: str) -> dict[str, Any]:
+        body = {"model": model, "reasoning_effort": effort, "include_reasoning": False, "response_format": form,
+                "messages": [{"role": "system", "content": rules}, {"role": "user", "content": text}]}
+
+        async def post() -> dict[str, Any] | None:
+            response = await client.post("/chat/completions", json=body)
+            if _broken_answer(response):
+                return None  # asked again below
+            if response.is_error:
+                # httpx's own message leaves out Groq's explanation, which says what was wrong.
+                raise httpx.HTTPStatusError(f"Groq said {response.status_code}: {response.text[:300]}",
+                                            request=response.request, response=response)
+            return response.json()
+
+        for _ in range(GROQ_TRIES):
+            reply = await with_retries(post, sleep=sleep, on_retry=on_retry)
+            if reply is not None:
+                break
+            if on_retry:
+                on_retry(BadAnswer("its answer broke the form"), 0.0)
+        else:
+            raise BadAnswer(f"Groq's answer broke the form {GROQ_TRIES} times (json_validate_failed)")
+        if on_usage:
+            on_usage(reply.get("usage", {}))
+        try:
+            return json.loads(reply["choices"][0]["message"]["content"] or "")
+        except (KeyError, IndexError, ValueError) as exc:
+            raise BadAnswer(f"not a JSON answer: {exc}") from exc
+
+    return ask
+
+
+def _broken_answer(response: httpx.Response) -> bool:
+    """Groq's 400 for an answer the model got wrong, not for a wrong request."""
+    if response.status_code != 400:
+        return False
+    try:
+        return response.json().get("error", {}).get("code") == "json_validate_failed"
+    except ValueError:
+        return False
+
+
+def paced(ask: Ask, gap_s: float, clock: Callable[[], float] = time.monotonic,
+          sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> Ask:
+    """At most one request every gap_s (the lab's judge_gap_s): staying under
+    a free tier's per-minute limit beats being refused and waiting anyway."""
+    last: list[float] = []
+
+    async def ask_paced(rules: str, text: str) -> dict[str, Any]:
+        if last:
+            wait = last[0] + gap_s - clock()
+            if wait > 0:
+                await sleep(wait)
+        last[:] = [clock()]
+        return await ask(rules, text)
+
+    return ask_paced

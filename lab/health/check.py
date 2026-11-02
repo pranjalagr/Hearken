@@ -236,11 +236,14 @@ def repeat_light(first: Sequence[CallScore], second: Sequence[CallScore], rounds
     return Light("repeatable", GREEN if inside else RED, detail)
 
 
-def judge_light(caught: int | None = None, planted: int | None = None, false_alarms: int | None = None) -> Light:
+def judge_light(caught: int | None = None, planted: int | None = None, false_alarms: int | None = None,
+                refused: int = 0) -> Light:
     if caught is None:
         # The health check makes no AI calls, so it points at the command that
         # does (an earlier message named a --with-judge flag that never existed).
         return Light("judge", NOT_RUN, "needs the AI: run python -m cli.lab_run judge-check (L11)")
-    ok = caught == planted and not false_alarms
+    # A judge that sometimes gives no usable answer leaves calls unjudged: not trustworthy either.
+    ok = caught == planted and not false_alarms and not refused
     return Light("judge", GREEN if ok else RED,
-                 f"caught {caught} of {planted} planted mistakes; {false_alarms} false alarms on clean calls")
+                 f"caught {caught} of {planted} planted mistakes; {false_alarms} false alarms on clean calls"
+                 + (f"; {refused} answers unusable" if refused else ""))

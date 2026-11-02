@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ears test recording</title>
+<style>
+:root { color-scheme: light dark; }
+body { font: 16px/1.5 system-ui, sans-serif; max-width: 680px; margin: 24px auto; padding: 0 16px; }
+#line { font-size: 1.6em; line-height: 1.3; margin: 8px 0 20px; min-height: 2.6em; }
+#line-id, #progress { opacity: .75; }
+button { font: inherit; padding: 8px 16px; margin: 0 6px 8px 0; }
+#message { color: #c0392b; min-height: 1.5em; }
+audio { display: block; width: 100%; margin: 8px 0; }
+label { display: block; margin: 12px 0; }
+</style>
+</head>
+<body>
+<h1>Ears test recording</h1>
+<p>Say each line the way you'd say it on a phone call, not slowly or carefully. A normal room is fine.
+If you're recording someone else, ask them first, and say the recordings stay on this computer.</p>
+<label>Speaker code (a short code like s1, never a real name):
+  <input id="speaker" value="s1" size="12" maxlength="12"></label>
+<p id="progress"></p>
+<p id="line-id"></p>
+<p id="line"></p>
+<button id="record" type="button">Record</button>
+<button id="stop" type="button" disabled>Stop</button>
+<button id="save" type="button" disabled>Save and next</button>
+<button id="back" type="button">Back</button>
+<button id="skip" type="button">Skip for now</button>
+<audio id="take" controls hidden></audio>
+<p id="message"></p>
+<script type="module" src="record.js"></script>
+</body>
+</html>

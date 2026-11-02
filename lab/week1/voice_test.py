@@ -89,8 +89,11 @@ SETUPS = (
 )
 SETUPS_BY_NAME = {setup.name: setup for setup in SETUPS}
 
-# Pacing: Google's free tier counts requests per minute; Sarvam is gentler.
-PAUSE_S = {"google": 6.0, "sarvam": 0.5}
+# Pacing: Google's free tier allows 3 speech requests a minute (its own 429,
+# 1 Nov 2026), so one every 21 s stays just under; the old 6 s ran into that
+# limit. Refused requests may also count against the 10-a-day cap, so it's
+# better not to be refused at all. Sarvam is gentler.
+PAUSE_S = {"google": 21.0, "sarvam": 0.5}
 RETRY_WAITS_S = (15.0, 30.0, 60.0)
 # The longest wait for the next bytes of a reply. A normal first sound comes
 # in under 7 s, so past this the request is stuck, not slow. Without it, one
@@ -264,8 +267,10 @@ def run_round(
     # Models out of quota for this run (they asked for hours): their other
     # clips are left unmade, not failed, so the next run makes them.
     out_of_quota: dict[str, int] = {}
+    # Counted across voices: two voices can share one model and so one
+    # per-minute limit, so the pause must also apply when the voice changes.
+    made = 0
     for setup in setups:
-        made = 0
         for line in lines:
             path = clip_path(out_dir, setup, line)
             key = f"{setup.name}/{line.id}"

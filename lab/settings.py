@@ -30,6 +30,7 @@ class LabSettings:
     wrong_stop_quiet_s: float
     busy_lab_tolerance_ms: float
     judge_timeout_s: float
+    judge_gap_s: float
     reshuffle_rounds: int
     reshuffle_seed: int
 

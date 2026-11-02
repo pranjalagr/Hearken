@@ -9,13 +9,13 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from lab.judge.judge import MODEL, Ask, BadAnswer, judge, packet_from_call
+from lab.judge.judge import Ask, BadAnswer, judge, packet_from_call
 from lab.scorer.call_record import load_call
 from lab.scorer.score import CallScore, read_score, write_score
 from lab.settings import LabSettings
 
 
-async def judge_run(run_dir: Path, ask: Ask, settings: LabSettings, model: str = MODEL) -> list[CallScore]:
+async def judge_run(run_dir: Path, ask: Ask, settings: LabSettings, model: str) -> list[CallScore]:
     judged = []
     for folder in sorted((run_dir / "calls").iterdir()):
         if not (folder / "score.json").exists():

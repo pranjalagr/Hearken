@@ -45,11 +45,13 @@ def timed_out(error: BaseException) -> bool:
 def http_status(error: BaseException) -> int | None:
     """urllib (Sarvam) keeps the HTTP status in .code; the Google library in
     .status_code (its errors have no .code: a hand-made stand-in with .code
-    hid this until the real library was tested)."""
-    for name in ("status_code", "code"):
-        value = getattr(error, name, None)
-        if isinstance(value, int):
-            return value
+    hid this until the real library was tested); plain httpx (Groq) only on
+    the error's .response."""
+    for source in (error, getattr(error, "response", None)):
+        for name in ("status_code", "code"):
+            value = getattr(source, name, None)
+            if isinstance(value, int):
+                return value
     return None
 
 
@@ -70,11 +72,12 @@ _RETRY_IN = re.compile(r"retry in (?=\d)(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)
 def asked_wait_s(error: BaseException) -> float | None:
     """How long the service itself asks us to wait, if it says: the standard
     Retry-After header (in seconds), else Google's "retry in 24h23m46s"."""
-    # urllib's HTTPError keeps headers on itself; the Google library's errors on .response.
+    # urllib's HTTPError keeps headers on itself; the Google library's and httpx's errors on .response.
     for source in (error, getattr(error, "response", None)):
         headers = getattr(source, "headers", None)
         value = headers.get("Retry-After") if hasattr(headers, "get") else None
-        if value is not None and str(value).strip().isdigit():
+        # Seconds, whole or not ("7.5"); the header's other form, a date, is skipped.
+        if value is not None and re.fullmatch(r"\d+(?:\.\d+)?", str(value).strip()):
             return float(value)
     match = _RETRY_IN.search(str(error))
     if match is None or not any(match.groups()):

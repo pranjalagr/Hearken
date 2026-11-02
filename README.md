@@ -87,6 +87,33 @@ Reports, clips and listening pages go to `runs/week1/` (not in git). The voice
 test skips clips it already made, so a run stopped by a daily limit carries on
 where it left off.
 
+### The ears test (which speech-to-text?)
+
+```powershell
+# window 1: record each line (http://127.0.0.1:8090, in Chrome or Edge)
+python -m cli.ears_test record
+
+# make the phone and phone + noise versions of every recording
+python -m cli.ears_test prepare
+
+# stream the clips at real speed; start with one clip per service
+python -m cli.ears_test run --limit 1 --services sarvam
+python -m cli.ears_test run
+
+# write the comparison again from saved results (free: no new requests)
+python -m cli.ears_test report
+```
+
+It compares Sarvam, Soniox, Deepgram and Google on key details: order numbers,
+names, amounts, and haan/nahi/ruko. Keys go in `pakka/.env`: `SARVAM_API_KEY`,
+`SONIOX_API_KEY`, `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`. A service without a key
+is skipped, and says so. Clips already heard are never sent again.
+
+Recordings stay under `lab/sounds/ears/` and results under
+`runs/week1/ears_test/`; neither is in git. Noise files (`.wav` or `.flac`) go in
+`lab/sounds/noise/`; without any, the noise is several of the recordings played
+at once, which only stands in for a crowd.
+
 ### The test lab (Part 5)
 
 ```powershell
@@ -100,10 +127,16 @@ python -m cli.lab_run run --robots puppet:perfect,puppet:careless
 # re-mark an old run from its folder alone (free: no new calls)
 python -m cli.lab_run rescore runs/lab/<run folder>
 
-# the AI judge (needs GEMINI_API_KEY): check it on planted mistakes, then mark a run
+# the AI judge: check it on planted mistakes, then mark a run
 python -m cli.lab_run judge-check
 python -m cli.lab_run judge runs/lab/<run folder>
 ```
+
+The judge is OpenAI's open model gpt-oss-120b on Groq (free), from another
+company than the robot's Talker. It needs a key in `pakka/.env`:
+`GROQ_API_KEY=...` (`--judge gemini` uses Gemini 3.8 Flash instead, whose free
+tier is too small for a whole check). Judge requests are spaced 20 s apart to
+stay under the free tier's per-minute limit.
 
 The puppet robots play every practice task perfectly or carelessly, so the
 lab's own answers are known before a call is made. Each run gets a folder
@@ -160,6 +193,7 @@ common/                 shared by robots and callers
   stopwatch.py          time stamps for every step of a call
   env.py                reads the keys in .env, never printing one
   google.py             the Google AI client: always a time limit, never hidden retries
+  groq.py               the Groq client (the judge), the same way
   retry.py              when to try an outside service again (and when a daily limit means stop)
 agents/
   common/call_box.py    one box per call: ends cleanly, shields a change already sent
@@ -168,6 +202,7 @@ agents/
   agent_c/talker/       the Talker's style prompt, and its [amount] slots and number check
 lab/
   week1/                the week-1 checks: Talker replies, amounts, voices
+  ears_test/            the speech-to-text test: lines, recording page, phone clips, services, marks
   settings.yaml         every number of the test lab, in one place
   runner/               starts each call (the robot as its own program), batches, reruns
   recorder/             the caller's side of the black box, and the clock map

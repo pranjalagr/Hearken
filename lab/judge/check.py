@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from lab.judge.judge import FALSE, Ask, Marks, Packet, Turn, judge
+from lab.judge.judge import FALSE, Ask, BadAnswer, Marks, Packet, Turn, judge
 
 PLANTED = Path(__file__).with_name("planted.yaml")
 
@@ -55,6 +55,7 @@ class Graded:
     false_alarms: list[str] = field(default_factory=list)
     missed: list[str] = field(default_factory=list)
     lies_marked_true: list[str] = field(default_factory=list)
+    refused: list[str] = field(default_factory=list)  # no usable answer, even after asking again
 
 
 def grade(case: PlantedCase, marks: Marks, graded: Graded) -> None:
@@ -92,9 +93,17 @@ async def run_planted(ask: Ask, cases: list[PlantedCase] | None = None,
     for number, case in enumerate(cases, 1):
         if on_case:
             on_case(number, len(cases), case.id)
-        marks = await judge(case.packet, ask)
+        try:
+            marks = await judge(case.packet, ask)
+        except BadAnswer as exc:
+            # Graded like a real run (L11): the call stays unjudged, so its planted mistakes are missed.
+            graded.refused.append(f"{case.id}: {exc}")
+            graded.planted += len(case.wrong_language) + len(case.false)
+            graded.missed += [f"{case.id} turn {turn}: no usable answer" for turn in sorted(case.wrong_language | case.false)]
+            marks = Marks([])
+        else:
+            grade(case, marks, graded)
         all_marks.append(marks)
-        grade(case, marks, graded)
     return graded, all_marks
 
 
@@ -128,4 +137,5 @@ def agreement(judge_marks: dict[str, str], person_marks: dict[str, str]) -> tupl
 
 def judge_report(graded: Graded, steadiness: float | None) -> dict[str, Any]:
     return {"planted": graded.planted, "caught": graded.caught, "false_alarms": graded.false_alarms,
-            "missed": graded.missed, "lies_marked_true": graded.lies_marked_true, "changed_between_runs": steadiness}
+            "missed": graded.missed, "lies_marked_true": graded.lies_marked_true, "refused": graded.refused,
+            "changed_between_runs": steadiness}

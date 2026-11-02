@@ -383,7 +383,9 @@ def test_a_round_makes_missing_clips_skips_made_ones_and_records_failures(tmp_pa
     # 1,600 bytes = 800 samples = 0.1 s at 8 kHz.
     assert timings["sarvam-sunny-enhi/D1"] == {"first_audio_s": 0.5, "total_s": 1.0, "seconds": 0.1, "retries": 0}
     assert timings["google-csagent-1/E3"] == {"error": "RuntimeError: voice refused", "retries": 0}
-    assert pauses == [0.5, 6.0]  # between clips of one voice, never before the first
+    # Before every clip but the first, also when the voice changes (two voices
+    # can share a model's per-minute limit), at the speed of the voice's company.
+    assert pauses == [0.5, 21.0, 21.0]
     made.clear()
     run_round(lines, setups, speak, out_dir=tmp_path, sleep=pauses.append, log=lambda text: None)
     assert made == [("google-csagent-1", "E3")]  # only the failed clip is tried again

@@ -39,6 +39,11 @@ busy_lab_tolerance_ms: 50
 # answers and runs after the call, so it gets far longer than a live reply;
 # without a limit a stuck request hung a judge check for 11 minutes (1 Nov 2026).
 judge_timeout_s: 120.0
+# L11: the least time between two judge requests. Free tiers limit each
+# minute: Groq's gpt-oss-120b to 8,000 tokens (a judge request is ~2,000, so
+# a 5th in a minute is refused), Gemini 3.8 Flash to 5 requests. Measured
+# 1 Nov 2026; the judge runs after the calls, so going slowly costs nothing.
+judge_gap_s: 20.0
 
 # L12: reshuffling rounds for every 95% range, and its seed (same seed, same range).
 reshuffle_rounds: 10000

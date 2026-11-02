@@ -1,0 +1,51 @@
+# The week-1 ears test lines (Part 2, decision 24): what a person says into the
+# recording page, and the key details the ears must get right.
+#
+# Each line tests something the robot must hear, using the seed's made-up
+# orders and customers. `expect` lists the details by kind, and `any` gives the
+# forms that count as heard, in English and Hindi letters: a service may write
+# either, and how it writes is scored separately, so bad spelling of the script
+# can't hide a good ear. Digits may also come as digit words (see score.py), so
+# "4521" already covers "4 5 2 1" and "chaar paanch do ek".
+
+# ---- N: order numbers, the way people really say them ----------------------------
+- {id: N1, say: "Mera order number chaar paanch do ek hai.", expect: [{kind: number, any: ["4521"]}]}
+- {id: N2, say: "Order chaar paanch ek do cancel karna hai.", expect: [{kind: number, any: ["4512"]}]}
+- {id: N3, say: "Paintalis ikkis mera order hai.", expect: [{kind: number, any: ["4521", "paintalis ikkis", "paintalees ikkees", "पैंतालीस इक्कीस"]}]}
+- {id: N4, say: "My order number is four five six one.", expect: [{kind: number, any: ["4561"]}]}
+- {id: N5, say: "It's forty five thirty.", expect: [{kind: number, any: ["4530", "forty five thirty"]}]}
+- {id: N6, say: "Chaar... paanch... chaar... saat.", expect: [{kind: number, any: ["4547"]}]}
+- {id: N7, say: "Nahi nahi, chaar paanch teen zero, chaar paanch tees nahi.", expect: [{kind: number, any: ["4530", "453045", "45304530"]}]}
+- {id: N8, say: "Order chaar paanch paanch paanch aur chaar paanch ek do.", expect: [{kind: number, any: ["4555"]}, {kind: number, any: ["4512"]}]}
+
+# ---- P: names ---------------------------------------------------------------------
+- {id: P1, say: "Mera naam Rahul Verma hai.", expect: [{kind: name, any: ["rahul verma", "rahul varma", "राहुल वर्मा"]}]}
+- {id: P2, say: "Priya Sharma ke naam se order hai.", expect: [{kind: name, any: ["priya sharma", "प्रिया शर्मा"]}]}
+- {id: P3, say: "This is Aman Gupta.", expect: [{kind: name, any: ["aman gupta", "अमन गुप्ता"]}]}
+- {id: P4, say: "Neha Singh bol rahi hoon.", expect: [{kind: name, any: ["neha singh", "नेहा सिंह"]}]}
+- {id: P5, say: "Sana Khan, order chaar paanch chaar saat.", expect: [{kind: name, any: ["sana khan", "सना खान"]}, {kind: number, any: ["4547"]}]}
+
+# ---- M: amounts -------------------------------------------------------------------
+- {id: M1, say: "Mujhe chaalis rupaye wapas chahiye.", expect: [{kind: amount, any: ["40", "chalis", "chaalis", "chalees", "चालीस"]}]}
+- {id: M2, say: "Dhai sau rupaye ka refund chahiye.", expect: [{kind: amount, any: ["250", "dhai sau", "dhaai sau", "adhai sau", "ढाई सौ"]}]}
+- {id: M3, say: "Ek sau bees rupaye pachaas paise bache hain.", expect: [{kind: amount, any: ["120", "12050", "ek sau bees", "एक सौ बीस"]}, {kind: amount, any: ["50 paise", "12050 paise", "12050 पैसे", "pachas paise", "pachaas paise", "पचास पैसे"]}]}
+- {id: M4, say: "I want two hundred and fifty rupees back.", expect: [{kind: amount, any: ["250", "two hundred and fifty", "two hundred fifty"]}]}
+- {id: M5, say: "Saadhe chaar sau rupaye kat gaye.", expect: [{kind: amount, any: ["450", "sadhe char sau", "saadhe chaar sau", "saade chaar sau", "sade char sau", "साढ़े चार सौ"]}]}
+
+# ---- Y: haan, nahi, ruko: the words a wrong action hangs on -------------------------
+- {id: Y1, say: "Haan.", expect: [{kind: haan, any: ["haan", "han", "haa", "ha", "हां", "हाँ", "yes"]}]}
+- {id: Y2, say: "Haan haan.", expect: [{kind: haan, any: ["haan", "han", "haa", "ha", "हां", "हाँ", "yes"]}]}
+- {id: Y3, say: "Nahi.", expect: [{kind: nahi, any: ["nahi", "nahin", "nahim", "nai", "नहीं", "no"]}]}
+- {id: Y4, say: "Nahi nahi, mat karo.", expect: [{kind: nahi, any: ["nahi", "nahin", "nai", "नहीं", "no"]}, {kind: ruko, any: ["mat karo", "mat kariye", "मत करो"]}]}
+- {id: Y5, say: "Ruko!", expect: [{kind: ruko, any: ["ruko", "rukko", "rooko", "rukiye", "रुको", "रुकिए", "रुकिये"]}]}
+- {id: Y6, say: "Ruko ruko, cancel mat karo.", expect: [{kind: ruko, any: ["ruko", "rukko", "rooko", "rukiye", "रुको", "रुकिए", "रुकिये"]}, {kind: ruko, any: ["mat karo", "मत करो"]}]}
+- {id: Y7, say: "Ek minute.", expect: [{kind: ruko, any: ["ek minute", "1 minute", "एक मिनट", "one minute"]}]}
+- {id: Y8, say: "Wait wait, don't cancel it.", expect: [{kind: ruko, any: ["wait", "वेट"]}, {kind: ruko, any: ["don't cancel", "dont cancel", "do not cancel", "डोंट कैंसल"]}]}
+- {id: Y9, say: "Haan, lekin SMS aayega na?", expect: [{kind: haan, any: ["haan", "han", "haa", "ha", "हां", "हाँ", "yes"]}, {kind: word, any: ["lekin", "लेकिन"]}, {kind: word, any: ["sms", "एसएमएस"]}]}
+- {id: Y10, say: "Hmm, theek hai.", expect: [{kind: word, any: ["theek hai", "thik hai", "ठीक है", "okay"]}]}
+
+# ---- S: mixed language and changing your mind ---------------------------------------
+- {id: S1, say: "Pizza wala aa gaya, doosra cancel karo.", expect: [{kind: word, any: ["doosra", "dusra", "दूसरा"]}, {kind: word, any: ["cancel", "कैंसिल", "कैंसल"]}]}
+- {id: S2, say: "Aur haan, address bhi badalna hai.", expect: [{kind: word, any: ["address", "एड्रेस"]}, {kind: word, any: ["badalna", "बदलना"]}]}
+- {id: S3, say: "Hello? Is it done?", expect: [{kind: word, any: ["is it done"]}]}
+- {id: S4, say: "House number 47 nahi, 74.", expect: [{kind: number, any: ["74", "chauhattar", "चौहत्तर", "seventy four"]}]}

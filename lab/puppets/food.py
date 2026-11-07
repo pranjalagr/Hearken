@@ -63,7 +63,9 @@ GREET = Say("Namaste, Hearken Food se bol raha hoon. Bataiye?")
 GREET_EN = Say("Hello, this is Hearken Food. How can I help?")
 ASK_ID = Say("Order number aur naam bataiye.")
 CONFIRM = UseTool("confirm", approve=True, shielded=True)
-CAUTIOUS_LISTEN = Listen(timeout_s=3.0)  # after a line the caller may not answer
+# After a line the caller may not answer. Room for a real caller's slowest reply (3 s)
+# and a short line: at 3 s the puppet talked over one that started 2.5 s in (4 Nov 2026).
+CAUTIOUS_LISTEN = Listen(timeout_s=8.0)
 
 
 def find(order_no: int, name: str) -> UseTool:

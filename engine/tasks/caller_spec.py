@@ -24,6 +24,10 @@ LANGUAGES = ("mostly_hindi", "mixed", "mostly_english")
 VOICES = ("female_young", "female_older", "male_young", "male_older")
 # C8: the first three number styles.
 NUMBER_STYLES = ("hindi_digits", "english_digits", "hindi_pairs")
+# C5: the noise under a caller's voice: what it is, and how loud against the voice.
+# TV waits until a recording with a licence that allows it is found.
+NOISE_KINDS = ("traffic", "kitchen", "crowd")
+NOISE_LEVELS = ("quiet", "medium", "loud")
 # C7: the 10 tricks, in the plan's order.
 TRICKS = (
     "switches_language",
@@ -56,6 +60,12 @@ DROP_KINDS = ("clean", "silent")
 
 
 @dataclass(frozen=True)
+class NoiseSpec:
+    kind: str
+    level: str
+
+
+@dataclass(frozen=True)
 class CallerSpec:
     name: str
     facts: dict[str, Any]  # the only facts the caller may say (checked against the seed)
@@ -66,6 +76,7 @@ class CallerSpec:
     number_style: str
     opening_line: str  # the same first turn for every robot (C13)
     tricks: tuple[str, ...] = field(default_factory=tuple)
+    noise: NoiseSpec | None = None  # None: a quiet line (C5: about 2 calls in 3)
 
 
 @dataclass(frozen=True)
@@ -85,7 +96,7 @@ class DropSpec:
 def parse_caller(raw: Any) -> CallerSpec:
     body = _mapping(raw, "caller")
     required = {"name", "facts", "wants", "personality", "language", "voice", "number_style", "opening_line"}
-    _exact_keys(body, required, optional={"tricks"}, where="caller")
+    _exact_keys(body, required, optional={"tricks", "noise"}, where="caller")
     for key in required - {"facts"}:
         _text(body[key], f"caller.{key}")
     facts = _mapping(body["facts"], "caller.facts")
@@ -120,7 +131,18 @@ def parse_caller(raw: Any) -> CallerSpec:
         number_style=body["number_style"],
         opening_line=body["opening_line"].strip(),
         tricks=tuple(tricks),
+        noise=_parse_noise(body.get("noise")),
     )
+
+
+def _parse_noise(raw: Any) -> NoiseSpec | None:
+    if raw is None:
+        return None
+    body = _mapping(raw, "caller.noise")
+    _exact_keys(body, {"kind", "level"}, optional=set(), where="caller.noise")
+    _one_of(body["kind"], NOISE_KINDS, "caller.noise.kind")
+    _one_of(body["level"], NOISE_LEVELS, "caller.noise.level")
+    return NoiseSpec(body["kind"], body["level"])
 
 
 def parse_race(raw: Any) -> RaceSpec:

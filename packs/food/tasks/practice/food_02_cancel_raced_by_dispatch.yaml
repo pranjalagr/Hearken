@@ -16,6 +16,7 @@ caller:
   language: mostly_hindi
   voice: male_young
   number_style: hindi_pairs
+  noise: {kind: traffic, level: medium}
   tricks: [corrects_number_once]
   opening_line: "Haan hello, mera order cancel karna hai"
 # The race happens "right after prepare", and plain mode has no prepare step.

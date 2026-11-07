@@ -25,7 +25,7 @@ from typing import Any
 
 import yaml
 
-from common.retry import asked_wait_s, asks_too_long, worth_retrying
+from common.retry import MAX_ASKED_WAIT_S, asked_wait_s, asks_too_long, worth_retrying
 
 ROOT = Path(__file__).resolve().parents[2]
 SITUATIONS = Path(__file__).with_name("talker_situations.yaml")
@@ -145,6 +145,7 @@ async def with_retries(
     waits: tuple[float, ...] = RETRY_WAITS_S,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     on_retry: Callable[[BaseException, float], None] | None = None,
+    longest_wait_s: float = MAX_ASKED_WAIT_S,
 ) -> Any:
     """The shared rules (common/retry.py): too many requests, a server error
     or a stuck request is tried again, after the wait the service asks for if
@@ -155,7 +156,7 @@ async def with_retries(
         try:
             return await call()
         except Exception as error:
-            if wait is None or not worth_retrying(error) or asks_too_long(error):
+            if wait is None or not worth_retrying(error) or asks_too_long(error, longest_wait_s):
                 raise
             wait = max(wait, asked_wait_s(error) or 0.0)
             if on_retry:

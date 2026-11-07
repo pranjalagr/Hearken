@@ -8,7 +8,7 @@ heard, the backend's tool times. The robot's diary never sets a score.
     2. tool silence      longest stretch with no robot sound while a tool runs
     3. stops on "ruko"   robot sound ends within stop_within_s of the "ruko"
     4. wrong stops       a "haan haan" made the robot stop mid-sentence
-    5. robot cut-offs    robot sound starts while the caller is mid-sentence
+    5. robot cut-offs    caller lines the robot started talking over
 """
 
 from __future__ import annotations
@@ -62,9 +62,10 @@ def measure(record: CallRecord, stop_within_s: float, wrong_stop_quiet_s: float)
             # the caller's speaker) soon after the "haan haan".
             cleared = [c for c in clears if 0 <= c - at <= wrong_stop_quiet_s * 1000]
             timing.wrong_stops.append({"at_ms": at, "stopped": bool(cleared)})
-    for start in (span.start_ms for span in sound):
-        if any(line["start_ms"] + CUT_OFF_GRACE_MS < start < line["end_ms"] for line in lines):
-            timing.cut_offs += 1
+    # Per caller line: one robot sentence is many sound spans, one per breath, and counted
+    # by span a single overlap looked like four (4 Nov 2026).
+    starts = [span.start_ms for span in sound]
+    timing.cut_offs = sum(any(line["start_ms"] + CUT_OFF_GRACE_MS < start < line["end_ms"] for start in starts) for line in lines)
     return timing
 
 

@@ -17,6 +17,7 @@ caller:
   language: mixed
   voice: female_young
   number_style: english_digits
+  noise: {kind: kitchen, level: medium}
   tricks: []
   opening_line: "Hello, mera order aa gaya par Raita missing hai."
 switches:

@@ -19,7 +19,7 @@ from typing import Any
 
 from common.wire.protocol import PIECE_MS, SILENT_PIECE
 from lab.puppets.food import CallerTurn
-from lab.synthetic_voice import is_speech, synthetic_line
+from lab.synthetic_voice import SyntheticRecordings, is_speech, synthetic_line
 
 ROBOT_DONE_MS = 800  # C9: the robot is done after this much quiet
 
@@ -46,10 +46,12 @@ class ScriptMic:
     def queued_pieces(self) -> int:
         return len(self._pieces)
 
-    def say_line(self, text: str, pieces: list[bytes], agrees: tuple[str, int] | None, language: str) -> None:
+    def say_line(self, text: str, pieces: list[bytes], agrees: tuple[str, int] | None, language: str,
+                 extra: dict[str, Any] | None = None) -> None:
         number = self._next_line
         self._next_line += 1
-        self._lines[number] = {"text": text, "agrees": agrees, "pieces": len(pieces), "language": language}
+        self._lines[number] = {"text": text, "agrees": agrees, "pieces": len(pieces), "language": language,
+                               "extra": extra or {}}
         self._pieces.extend((piece, number) for piece in pieces)
 
     def next_piece(self, tick: int) -> bytes:
@@ -82,6 +84,7 @@ class ScriptMic:
         line = self._lines[number]
         self._current = None
         self._on_event("caller.line", {
+            **line["extra"],
             "text": line["text"],
             "language": line["language"],
             "start_ms": line.get("start_ms"),
@@ -106,6 +109,31 @@ class ScriptedCaller:
         self._robot_spoke = False
         self._quiet_ms = 0
         self.director = None  # set once the line is built: it hears what the caller says
+        self.recordings = SyntheticRecordings()
+        self.error = None
+
+    # The runner's side: the chain caller has real work in each of these (lab/caller/chain.py).
+
+    def wrap_mic(self, mic):
+        return mic
+
+    def attach(self, line, director) -> None:
+        self.director = director
+
+    async def prepare(self) -> None:
+        pass
+
+    def background(self) -> list:
+        return []
+
+    async def close(self) -> None:
+        pass
+
+    def about(self) -> dict[str, Any]:
+        return {"voice": "synthetic stand-in", "brain": "scripted (puppet lab run)"}
+
+    def director_event(self, happened: Any) -> None:
+        pass
 
     def heard(self, piece: bytes | None, caller_ms: int) -> None:
         if piece is not None and is_speech(piece):

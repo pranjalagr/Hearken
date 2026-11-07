@@ -16,6 +16,7 @@ caller:
   language: mostly_hindi
   voice: female_older
   number_style: hindi_pairs
+  noise: {kind: crowd, level: quiet}
   tricks: [yes_with_condition]
   opening_line: "Haan ji, mujhe apna order cancel karna hai."
 # Paid in cash, so nothing comes back: no refund row may appear.

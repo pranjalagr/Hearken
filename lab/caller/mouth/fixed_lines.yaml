@@ -1,0 +1,43 @@
+# The pretend caller's fixed lines (Part 3, C13 and C4): the same for every robot,
+# so they live here and not with an AI. Left: as the task file and the logs write
+# them, in English letters. Right: as the callers' voice gets them, in Hindi letters,
+# which it reads correctly (judged by ear, 4 Nov 2026). Digits stay digits: code says
+# them in the task's number style. A purely English line stays in English.
+#
+# A task with a line missing here stops before the call starts (a task bug), so
+# a new task can't quietly reach the voice in letters it reads wrong.
+
+# Opening lines.
+"Hello, mera order cancel karna hai.": "हैलो, मेरा ऑर्डर कैंसिल करना है।"
+"Haan hello, mera order cancel karna hai": "हां हैलो, मेरा ऑर्डर कैंसिल करना है"
+"Hello, mera order aa gaya par Raita missing hai.": "हैलो, मेरा ऑर्डर आ गया पर रायता मिसिंग है।"
+"Hi, I need to change the delivery address of my order.": "Hi, I need to change the delivery address of my order."
+"Haan ji, mera order cancel karwana hai.": "हां जी, मेरा ऑर्डर कैंसिल करवाना है।"
+"Hi, I want to know where my order is.": "Hi, I want to know where my order is."
+"Hello, mera order kahan tak pahuncha?": "हैलो, मेरा ऑर्डर कहां तक पहुंचा?"
+"Haan ji, mere order mein ek thali kam aayi hai.": "हां जी, मेरे ऑर्डर में एक थाली कम आई है।"
+"Haan ji, mujhe apna order cancel karna hai.": "हां जी, मुझे अपना ऑर्डर कैंसिल करना है।"
+"Hello, mere bhai ke order mein momos nahi aaye.": "हैलो, मेरे भाई के ऑर्डर में मोमोज़ नहीं आए।"
+"Hello, mere do order hain, ek cancel karna hai.": "हैलो, मेरे दो ऑर्डर हैं, एक कैंसिल करना है।"
+"Haan, order cancel karna hai, jaldi please.": "हां, ऑर्डर कैंसिल करना है, जल्दी प्लीज़।"
+"Hello, mere order mein Raita nahi aaya.": "हैलो, मेरे ऑर्डर में रायता नहीं आया।"
+"Haan ji, mujhe address badalna hai.": "हां जी, मुझे एड्रेस बदलना है।"
+"Order cancel karna hai, abhi.": "ऑर्डर कैंसिल करना है, अभी।"
+
+# Race lines (C10).
+"hello? ho gaya kya?": "हैलो? हो गया क्या?"
+"ruko ruko, mat karo, main wait kar leta hoon": "रुको रुको, मत करो, मैं वेट कर लेता हूं"
+"haan haan": "हां हां"
+"Hello? Is it done?": "Hello? Is it done?"
+"ruko, cancel mat karo!": "रुको, कैंसिल मत करो!"
+"aur haan, 4561 ka address bhi badalna hai": "और हां, 4561 का एड्रेस भी बदलना है"
+"nahi nahi, 47 nahi, 74": "नहीं नहीं, 47 नहीं, 74"
+"ruko!": "रुको!"
+
+# The director's own lines (C9).
+"ek minute, suniye...": "एक मिनट, सुनिए..."
+"hello? sun rahe ho?": "हैलो? सुन रहे हो?"
+
+# Giving up (C12), and the safe line when the brain's answer can't be used.
+"Chhodiye, rehne dijiye. Bye.": "छोड़िए, रहने दीजिए। बाय।"
+"Ek minute, phir se bataiye.": "एक मिनट, फिर से बताइए।"

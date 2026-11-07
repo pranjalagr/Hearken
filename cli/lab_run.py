@@ -22,14 +22,18 @@ import json
 import sys
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from common.env import load_env, require
+from common.groq import groq_client
 from common.retry import http_status
 from engine.tasks.task_file import load_task, load_tasks
+from lab.caller.parts import RealCaller, missing_keys
+from lab.caller.report_card import AI_FORM, report_on_run
+from lab.caller.settings import load_caller_settings
 from lab.health.run_health import run_health
-from lab.judge.judge import Ask, paced
+from lab.judge.judge import Ask, groq_judge, paced
 from lab.puppets.food import PUPPETS, Careless, script_for
 from lab.results.table import compare, results_markdown, summarize
 from lab.runner.batch import make_run_dir, plan_calls, run_batch, write_run_json
@@ -41,6 +45,10 @@ from packs.food.pack import FoodPack
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs" / "lab"
 PRACTICE = ROOT / "packs" / "food" / "tasks" / "practice"
+# The caller's report card reads each call once, after the call, so speed doesn't
+# matter. Each Groq model has its own daily tokens: the caller's model ran out on
+# 4 Nov 2026, and this one takes nothing from it.
+REPORT_MODEL = "openai/gpt-oss-120b"
 ROBOTS = {"puppet:perfect": PuppetRobot("perfect"), "puppet:careless": PuppetRobot("careless")}
 
 
@@ -50,16 +58,40 @@ async def run(args: argparse.Namespace) -> Path:
         settings = settings.with_changes(calls_at_once=args.at_once)
     robots = [ROBOTS[name] for name in args.robots.split(",")]
     tasks = load_tasks(PRACTICE)
+    if args.tasks:
+        wanted = args.tasks.split(",")
+        tasks = [task for task in tasks if any(task.id.startswith(prefix) for prefix in wanted)]
+    caller_info: dict = {}
+    if args.caller == "chain":
+        # Real ears, brain and voice (Part 3): the puppet needs real speech for them to hear.
+        caller_settings = load_caller_settings()
+        if args.brain:
+            # C3's comparison: "gemini:gemini-3.5-flash-lite", for one run.
+            company, model = args.brain.split(":", 1)
+            caller_settings = replace(caller_settings, brain_company=company, brain_model=model)
+        missing = missing_keys(caller_settings)
+        if missing:
+            raise SystemExit(f"missing in pakka/.env: {', '.join(missing)}")
+        robots = [replace(robot, voice="sarvam") for robot in robots]
+        caller_info = {"caller": "chain", "caller_settings": caller_settings.as_dict()}
 
     def mode_for(task, robot):
         return script_for(task.id, robot.variant)[1]
 
     plans = [p for p in plan_calls(tasks, robots, args.repeats, mode_for)
              if p.robot.variant == "perfect" or isinstance(PUPPETS[p.task.id].careless, Careless)]
+    if args.caller == "chain":
+        maker = RealCaller(caller_settings, use_noise=False)  # every robot here is a puppet
+        await maker.warm_up()
+        plans = [replace(plan, caller=maker) for plan in plans]
     run_dir = make_run_dir(RUNS, args.label)
-    write_run_json(run_dir, plans, robots, settings, {"kind": "run", "repeats": args.repeats})
+    write_run_json(run_dir, plans, robots, settings, {"kind": "run", "repeats": args.repeats, **caller_info})
     print(f"{len(plans)} calls, {settings.calls_at_once} at once -> {run_dir}")
-    batch = await run_batch(plans, FoodPack(), run_dir, settings)
+    try:
+        batch = await run_batch(plans, FoodPack(), run_dir, settings)
+    finally:
+        if args.caller == "chain":
+            await maker.close()
     _write_results(run_dir, batch.scores, settings, {"Calls": len(batch.outcomes), "Reruns": batch.reruns,
                                                      "Stopped early": batch.stopped or "no",
                                                      "Seconds": f"{batch.seconds:.0f}"})
@@ -170,6 +202,21 @@ async def judge_a_run(run_dir: Path, name: str) -> None:
     _write_results(run_dir, scores, settings, {"Judged calls": len(scores), "Judge": judge.model})
 
 
+async def caller_report(run_dir: Path, with_ai: bool):
+    """C15. The AI reads each call once, on the free tier, paced like the judge."""
+    settings = load_settings()
+    caller_settings = load_caller_settings()
+    if not with_ai:
+        return await report_on_run(run_dir, caller_settings, settings.sound_level)
+    load_env()
+    client = groq_client(require("GROQ_API_KEY"), settings.judge_timeout_s)
+    try:
+        ask = paced(groq_judge(client, REPORT_MODEL, "low", form=AI_FORM), settings.judge_gap_s)
+        return await report_on_run(run_dir, caller_settings, settings.sound_level, ask)
+    finally:
+        await client.aclose()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="The test lab.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -178,6 +225,12 @@ def main() -> None:
     run_cmd.add_argument("--repeats", type=int, default=1)
     run_cmd.add_argument("--at-once", type=int, default=0)
     run_cmd.add_argument("--label", default="run")
+    run_cmd.add_argument("--caller", choices=["scripted", "chain"], default="scripted")
+    run_cmd.add_argument("--tasks", default="", help="only these, e.g. food_01,food_07")
+    run_cmd.add_argument("--brain", default="", help="the chain caller's brain for this run, e.g. gemini:gemini-3.5-flash-lite")
+    card = commands.add_parser("caller-report", help="mark the pretend caller on a run (C15)")
+    card.add_argument("folder")
+    card.add_argument("--no-ai", action="store_true", help="only the checks code can do")
     health = commands.add_parser("health", help="check the lab itself")
     health.add_argument("--quick", action="store_true")
     again = commands.add_parser("rescore", help="re-mark an old run")
@@ -210,6 +263,9 @@ def main() -> None:
     elif args.command == "judge":
         asyncio.run(judge_a_run(Path(args.folder), args.judge))
         print(f"results: {Path(args.folder) / 'results.md'}")
+    elif args.command == "caller-report":
+        report = asyncio.run(caller_report(Path(args.folder), not args.no_ai))
+        print(report.markdown())
     else:
         asyncio.run(rescore(Path(args.folder)))
         print(f"results: {Path(args.folder) / 'results.md'}")

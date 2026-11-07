@@ -86,7 +86,8 @@ def asked_wait_s(error: BaseException) -> float | None:
     return hours * 3600 + minutes * 60 + seconds
 
 
-def asks_too_long(error: BaseException) -> bool:
-    """A daily limit, not a per-minute one: no retry here can outlast it."""
+def asks_too_long(error: BaseException, longest_s: float = MAX_ASKED_WAIT_S) -> bool:
+    """A daily limit, not a per-minute one: no retry here can outlast it. Work someone
+    is waiting on live passes its own, shorter limit."""
     asked = asked_wait_s(error)
-    return asked is not None and asked > MAX_ASKED_WAIT_S
+    return asked is not None and asked > longest_s

@@ -33,7 +33,7 @@ from lab.scorer.timing import measure
 from lab.settings import LabSettings
 
 # Bumped whenever the marking rules change, so a re-marked run says which rules marked it (L14).
-SCORER_VERSION = "1"
+SCORER_VERSION = "2"
 
 
 @dataclass

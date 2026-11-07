@@ -44,7 +44,6 @@ from lab.caller.scripted import ScriptedCaller
 from lab.puppets.food import PUPPETS
 from lab.recorder.caller_side import CallerRecorder, Ears
 from lab.settings import LabSettings
-from lab.synthetic_voice import SyntheticRecordings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -64,6 +63,9 @@ class RobotSpec(Protocol):
 @dataclass(frozen=True)
 class PuppetRobot:
     variant: str  # perfect or careless
+    # "sarvam": real speech, so a caller with real ears can hear it. Beeps are enough
+    # for the scripted caller, and they cost nothing (Part 3, C14).
+    voice: str = "synthetic"
 
     @property
     def name(self) -> str:
@@ -76,8 +78,13 @@ class PuppetRobot:
             "--bells", bells_url, "--diary", str(folder / "robot.jsonl"),
             "--backend-events", str(folder / "backend.jsonl"),
             "--no-audio-s", str(settings.robot_no_audio_s), "--max-call-s", str(settings.robot_max_call_s),
-            "--change-wait-s", str(settings.robot_change_wait_s),
+            "--change-wait-s", str(settings.robot_change_wait_s), "--voice", self.voice,
         ]
+
+
+class CallerMaker(Protocol):
+    def __call__(self, plan: CallPlan, on_event: Any) -> Any:
+        """The caller for one call: an object with the scripted caller's shape."""
 
 
 @dataclass(frozen=True)
@@ -88,6 +95,8 @@ class CallPlan:
     mode: str
     seed: int
     attempt: int = 1
+    # Who makes the caller; None is the scripted caller, for puppet lab runs.
+    caller: CallerMaker | None = None
 
 
 @dataclass
@@ -122,11 +131,12 @@ async def run_call(plan: CallPlan, pack: Pack, run_dir: Path, board: BellBoard, 
     stderr = (folder / "robot.stderr.txt").open("wb")
     robot = await RobotProcess.start(plan.robot.command(db, folder, bells_url, settings, plan.task), stderr)
     recorder = CallerRecorder(plan.call_id)
+    about_caller: dict[str, Any] = {}
     try:
         url = await _wait_ready(robot, settings.robot_ready_timeout_s)
         if url is None:
             return _label(outcome, ROBOT_FAILURE, "the robot never said ready")
-        await _talk(plan, url, board, recorder, outcome, settings)
+        about_caller = await _talk(plan, url, board, recorder, outcome, settings)
     finally:
         outcome.robot_end, code = await _stop(robot, settings)
         stderr.close()
@@ -134,25 +144,40 @@ async def run_call(plan: CallPlan, pack: Pack, run_dir: Path, board: BellBoard, 
         # Writing the audio is slow work: off this loop, which is still beating
         # 20 ms pieces for the other calls (on 1 Nov 2026, doing it here froze
         # every live call by up to 0.4 s).
-        await asyncio.to_thread(recorder.save, folder, _about(plan))
+        await asyncio.to_thread(recorder.save, folder, _about(plan, about_caller))
         if outcome.label == FINE:
             _judge_break(outcome, code, settings)
         (folder / "outcome.json").write_text(json.dumps(asdict(outcome), indent=1, default=str), encoding="utf-8")
     return outcome
 
 
-async def _talk(plan: CallPlan, url: str, board: BellBoard, recorder: CallerRecorder, outcome: CallOutcome,
-                settings: LabSettings) -> None:
-    puppet = PUPPETS[plan.task.id]
+def _scripted_caller(plan: CallPlan, on_event: Any) -> ScriptedCaller:
     english = plan.task.caller is not None and plan.task.caller.language == "mostly_english"
-    caller = ScriptedCaller(puppet.caller, recorder.event, language="english" if english else "hinglish")
+    return ScriptedCaller(PUPPETS[plan.task.id].caller, on_event, language="english" if english else "hinglish")
+
+
+async def _talk(plan: CallPlan, url: str, board: BellBoard, recorder: CallerRecorder, outcome: CallOutcome,
+                settings: LabSettings) -> dict[str, Any]:
+    caller = (plan.caller or _scripted_caller)(plan, recorder.event)
+    try:
+        # Before dialling, so a caller that can't start never costs the robot anything.
+        await caller.prepare()
+    except Exception as exc:
+        _label(outcome, LAB_PROBLEM, f"the caller couldn't start: {exc!r}")
+        await caller.close()
+        return caller.about()
     director_plan = DirectorPlan.from_task(plan.task, plan.seed)
+
+    def director_said(happened: Any) -> None:
+        recorder.director_event(happened)
+        caller.director_event(happened)
+
     line, director = caller_with_director(
-        url, plan.call_id, director_plan, caller.mic, SyntheticRecordings(),
-        ear=Ears(recorder, caller), on_event=recorder.director_event, tap=recorder.tap,
-        on_cleared=recorder.cleared,
+        url, plan.call_id, director_plan, caller.mic, caller.recordings,
+        ear=Ears(recorder, caller), on_event=director_said, tap=recorder.tap,
+        on_cleared=recorder.cleared, wrap_mic=caller.wrap_mic,
     )
-    caller.director = director
+    caller.attach(line, director)
     bells = board.bells_for(plan.call_id)
 
     async def follow() -> None:
@@ -169,7 +194,7 @@ async def _talk(plan: CallPlan, url: str, board: BellBoard, recorder: CallerReco
     except ProtocolError as exc:
         _label(outcome, ROBOT_FAILURE, f"the robot broke the wire's rules: {exc}")
     except TimeoutError:  # before OSError: in Python a TimeoutError IS an OSError
-        _label(outcome, ROBOT_FAILURE, "the call never ended")
+        _label_never_ended(outcome, late.max_late_ms, settings)
     except (OSError, InvalidHandshake) as exc:
         # It said "ready" at an address that doesn't take the call.
         _label(outcome, ROBOT_FAILURE, f"the robot's phone didn't answer: {exc!r}")
@@ -183,7 +208,22 @@ async def _talk(plan: CallPlan, url: str, board: BellBoard, recorder: CallerReco
         outcome.extra["worst_late_at_ms"] = late.worst_at_ms
         race = director.report.race
         outcome.race = asdict(race) if race is not None else None
+        await caller.close()
+        if caller.error is not None and outcome.label == FINE:
+            # The caller broke (a limit, its ears, its voice): rerun it. L4: this
+            # says nothing about the robot, so it never counts against one.
+            _label(outcome, LAB_PROBLEM, f"the caller broke: {caller.error!r}")
         recorder.event("call.end", {"reason": outcome.end_reason, "caller_ms": recorder.last_ms})
+    return caller.about()
+
+
+def _label_never_ended(outcome: CallOutcome, late_ms: float, settings: LabSettings) -> None:
+    """L4. If the lab itself stopped, the clock ran out on the lab, not on the robot: a
+    laptop in standby for 43 minutes was marked as the robot's failure (5 Nov 2026)."""
+    if late_ms > settings.freeze_limit_ms:
+        _label(outcome, LAB_PROBLEM, f"the lab fell behind by {late_ms:.0f} ms")
+    else:
+        _label(outcome, ROBOT_FAILURE, "the call never ended")
 
 
 def _judge_break(outcome: CallOutcome, robot_code: int | None, settings: LabSettings) -> None:
@@ -301,7 +341,7 @@ def _backup(source: Path, target: Path) -> None:
     src.close()
 
 
-def _about(plan: CallPlan) -> dict[str, Any]:
+def _about(plan: CallPlan, about_caller: dict[str, Any]) -> dict[str, Any]:
     caller = plan.task.caller
     return {
         "call_id": plan.call_id,
@@ -311,8 +351,7 @@ def _about(plan: CallPlan) -> dict[str, Any]:
         "seed": plan.seed,
         "attempt": plan.attempt,
         "caller": asdict(caller) if caller is not None else None,
-        "voice": "synthetic stand-in (until the voice is picked)",
-        "brain": "scripted (puppet lab run)",
+        **about_caller,
         "race": asdict(plan.task.race) if plan.task.race else None,
         "drop": asdict(plan.task.drop) if plan.task.drop else None,
         "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),

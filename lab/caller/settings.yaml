@@ -1,0 +1,61 @@
+# Every number and name of the pretend caller (Part 3, C18). Starting guesses from
+# the decisions named next to each; change them here, never in code.
+
+# C3, 4 Nov 2026: Groq. gemini-3.8-flash's free tier stops at 20 requests a day, about
+# 2-3 calls. Flash-Lite took 11-30 s a reply in its test, even for a plain question
+# (about 1 s on other days, runs/week1), so it lost almost every reply: its speed that
+# day rules it out, and its answers were never really tested.
+brain_company: groq
+brain_model: openai/gpt-oss-20b
+# Past this a caller reply is stuck, not slow: the reply gap must stay under ~3 s (C9).
+brain_timeout_s: 8.0
+
+# C2, 4 Nov 2026: on the robot voice's 76 clips, marked by an AI, Sarvam got 68 fine and
+# Deepgram 58 (several of Sarvam's misses were the marker's false alarms). Sarvam is
+# also cheaper per minute. Its ears also hear its own voice, which may be easier than
+# a real caller's ears are: to be compared at the real-voice check (week 11).
+ears_company: sarvam
+
+# C4: the five voices, by the task's voice label. An angry caller may have its own.
+voices:
+  male_young: {voice: aviraj, model: lightning_v3.1_pro}
+  female_young: {voice: rhea, model: lightning_v3.1_pro}
+  male_older: {voice: sanjay, model: lightning_v3.1}
+  female_older: {voice: nirupma, model: lightning_v3.1}
+angry_voices:
+  female_young: {voice: inaaya, model: lightning_v3.1_pro}
+
+# C9: the robot is done after this much quiet.
+robot_done_s: 0.8
+# C9: extra wait after that, by personality. Real replies also need the brain and
+# the voice, about 2 s when measured, so these are the least, not the gap itself.
+extra_gap_s: {patient: 0.2, angry: 0.0, elderly: 1.5, in_a_hurry: 0.0, quiet: 0.8}
+# Start thinking once the robot has been quiet this long. At 0.6 s, 21 requests in 17
+# calls were thrown away within 200 ms, in the robot's pauses between sentences, and
+# pushed the caller into Groq's 8,000 tokens a minute (5 Nov 2026). Never above
+# robot_done_s: new words must start a new thought before an old reply can be said.
+think_after_quiet_s: 0.8
+# Owing the robot a reply for this much quiet means the caller is broken, not slow: the
+# lab reruns the call (L4). Must stay under a robot's patience (the puppet waits 15 s),
+# or the robot moves on and gets the blame. Groq's waits on its limits reached about 10 s.
+reply_stuck_s: 12.0
+# A reply thought of before the robot's last sound waits this long after it, so any words
+# in that sound can reach the ears first (Sarvam's final words come about 0.6-1 s late).
+late_words_s: 1.5
+# If no robot sound comes at all, a real caller says hello after a while.
+opening_wait_s: 4.0
+# C12: sound but no words after this long: tell the brain it couldn't hear.
+heard_nothing_after_s: 3.0
+# C12: giving up.
+give_up_same_question: 3
+give_up_s: {patient: 480.0, angry: 240.0, elderly: 480.0, in_a_hurry: 300.0, quiet: 480.0}
+goodbye_wait_s: 3.0
+
+# Above this (RMS) a robot piece counts as sound; the same as the lab's sound_level.
+robot_sound_level: 0.01
+
+# US dollars, from each company's own pricing page, 2-4 Nov 2026; the brain's
+# free tier costs nothing, so its tokens are only counted.
+price_per_10k_characters: {lightning_v3.1_pro: 0.195, lightning_v3.1: 0.175}
+# Sarvam lists ₹0.49 a minute: about $0.0058 at ₹85 a dollar.
+ears_price_per_minute: {deepgram: 0.0092, sarvam: 0.0058}

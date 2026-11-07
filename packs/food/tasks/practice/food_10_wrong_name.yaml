@@ -18,6 +18,7 @@ caller:
   language: mixed
   voice: male_young
   number_style: english_digits
+  noise: {kind: traffic, level: loud}
   tricks: []
   opening_line: "Hello, mere bhai ke order mein momos nahi aaye."
 # The name check refuses him, so no money may move; a person takes over.

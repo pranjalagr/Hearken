@@ -12,7 +12,9 @@ What is here so far:
 - **the call box**: everything one call runs, ended cleanly when the call ends;
 - **the test lab's first parts**: the bell board, the director (exact-moment
   race lines and drops), the dummy robot, the caller's number words, and a web
-  phone to call any robot from the browser.
+  phone to call any robot from the browser;
+- **the pretend caller** (Part 3): real ears, brain and voice behind the director,
+  checked by code on every line, with its own report card.
 
 The plan and every design decision are kept in a separate document, not in
 this repo.
@@ -130,6 +132,14 @@ python -m cli.lab_run rescore runs/lab/<run folder>
 # the AI judge: check it on planted mistakes, then mark a run
 python -m cli.lab_run judge-check
 python -m cli.lab_run judge runs/lab/<run folder>
+
+# the real pretend caller instead of the scripted one (real requests: needs
+# SARVAM_API_KEY, SMALLEST_API_KEY and GROQ_API_KEY in pakka/.env)
+python -m cli.caller_sounds                                 # first time: the noise files
+python -m cli.lab_run run --caller chain                    # every practice task
+python -m cli.lab_run run --caller chain --tasks food_01,food_07
+python -m cli.lab_run caller-report runs/lab/<run folder>   # is the caller itself good?
+python -m cli.talk_to_caller --task food_01                 # you play the robot, in the browser
 ```
 
 The judge is OpenAI's open model gpt-oss-120b on Groq (free), from another
@@ -214,7 +224,14 @@ lab/
   bell_board.py         where backends ring their bells for the director
   caller/director/      exact-moment race lines, tricks and drop tests
   caller/scripted.py    a scripted caller brain, for lab runs with puppets
-  caller/mouth/         the caller's number words (kept apart from any robot code)
+  caller/chain.py       the real caller: when it thinks, speaks, gives up or reports itself stuck
+  caller/parts.py       puts the real services together, chosen by caller/settings.yaml
+  caller/brain/         the model's turn and the code checks on it (numbers, what a yes means)
+  caller/ears/          the caller's hearing, final words only
+  caller/mouth/         its voice, fixed lines, phone mic and number words (apart from any robot code)
+  caller/prompts/       the caller's role, personalities and tricks
+  caller/report_card.py is the caller itself good? (code checks, then an AI that must quote)
+  caller/person_on_line.py  joins you and the caller, for talk_to_caller
   dummy_robot/          the puppet robot (fixed script), the echo robot, a crashing robot
   web_phone/            the browser phone (its logic is tested with Node)
   synthetic_voice.py    a stand-in voice until the real ones are picked

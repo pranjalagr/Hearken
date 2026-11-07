@@ -17,11 +17,12 @@ caller:
     other_order_no: 4561
     new_address_order: 4561
     new_address: "Flat 2C, Rose Apartments, Model Town, Ludhiana"
-  wants: 40 rupees back for the Raita on 4512, then a new address for 4561
+  wants: 40 rupees back for the Raita on 4512
   personality: patient
   language: mixed
   voice: female_young
   number_style: english_digits
+  noise: {kind: crowd, level: medium}
   tricks: []
   opening_line: "Hello, mere order mein Raita nahi aaya."
 race:

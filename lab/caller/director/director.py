@@ -490,17 +490,20 @@ def caller_with_director(
     settings: DirectorSettings = DirectorSettings(),
     tap=None,
     on_cleared=None,
+    wrap_mic=None,
 ) -> tuple[CallerLine, Director]:
     """Wire a caller line with the director in front of the brain's mouth and
     behind the caller's ear. The one place this wiring is done.
 
-    `tap(tick, piece)` sees every piece the caller really sends, director
-    lines included: the lab's recorder (Part 5, L5/L6) keeps the caller's
-    side of the call from it."""
+    `wrap_mic` adds what happens to the sound after the director chose it: noise
+    and the phone's codec (C5). `tap(tick, piece)` sees every piece the caller
+    really sends, director lines included: the lab's recorder (Part 5, L5/L6)
+    keeps the caller's side of the call from it."""
     playback = Playback()
     controls = LineControls()
     director = Director(plan, recordings, brain_mic, playback, controls, on_event, settings)
-    mic = director.mic if tap is None else _TappedMic(director.mic, tap)
+    mic = director.mic if wrap_mic is None else wrap_mic(director.mic)
+    mic = mic if tap is None else _TappedMic(mic, tap)
     line = CallerLine(url, call_id, mic, director.ear(ear or NullEar()), playback=playback, on_cleared=on_cleared)
     controls.bind(line)
     return line, director

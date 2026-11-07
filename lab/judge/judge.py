@@ -222,18 +222,20 @@ def strict_form(schema: dict[str, Any]) -> dict[str, Any]:
 def groq_judge(client: Any, model: str = GROQ_MODEL, effort: str = GROQ_EFFORT,
                on_retry: Callable[[BaseException, float], None] | None = None,
                on_usage: Callable[[dict[str, Any]], None] | None = None,
-               sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> Ask:
+               sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+               form: dict[str, Any] = FORM) -> Ask:
     """The judge on Groq: strict mode makes the answer match the form, and
     the model's own reasoning is left out of the reply (only the form comes
     back). on_usage hears each reply's token counts: the free tier's daily
     token cap, not its request cap, is what runs out first. sleep is the
-    retry wait (tests pass a fake one)."""
+    retry wait (tests pass a fake one). `form` lets another marker use the same
+    careful asking with its own answer form (the caller's report card)."""
     from lab.week1.flash_lite_check import with_retries
 
-    form = {"type": "json_schema", "json_schema": {"name": "judge_marks", "strict": True, "schema": strict_form(FORM)}}
+    answer_form = {"type": "json_schema", "json_schema": {"name": "judge_marks", "strict": True, "schema": strict_form(form)}}
 
     async def ask(rules: str, text: str) -> dict[str, Any]:
-        body = {"model": model, "reasoning_effort": effort, "include_reasoning": False, "response_format": form,
+        body = {"model": model, "reasoning_effort": effort, "include_reasoning": False, "response_format": answer_form,
                 "messages": [{"role": "system", "content": rules}, {"role": "user", "content": text}]}
 
         async def post() -> dict[str, Any] | None:

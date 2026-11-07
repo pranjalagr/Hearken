@@ -105,6 +105,13 @@ def test_a_wrong_stop_is_the_robot_clearing_its_own_sentence_after_haan_haan():
     assert measure(fine, 1.0, 1.0).wrong_stops == [{"at_ms": 2000, "stopped": False}]
 
 
+def test_one_robot_sentence_over_a_caller_line_is_one_cut_off_however_many_breaths_it_has():
+    breaths = [(1500, 1800), (1900, 2200), (2300, 2600), (2700, 3500)]
+    assert measure(record([line("mera order 4521 hai aur...", 1000, 3000)], sound=breaths), 1.0, 1.0).cut_offs == 1
+    two = record([line("pehli baat", 1000, 3000), line("doosri baat", 4000, 6000)], sound=[(2000, 2500), (5000, 5500)])
+    assert measure(two, 1.0, 1.0).cut_offs == 2
+
+
 def test_the_robot_starting_mid_sentence_is_a_cut_off():
     call = record([line("mera order 4521 hai aur...", 1000, 3000)], sound=[(2000, 2500)])
     answered = record([line("hello", 1000, 2000)], sound=[(2050, 2500)])

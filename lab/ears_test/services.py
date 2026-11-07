@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import json
+import ssl
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -40,6 +42,23 @@ SARVAM_MODEL = "saaras:v3-realtime"
 # speaks. Hindi is the base because most of our callers mix Hindi into English.
 SARVAM_LANGUAGE = "hi-IN"
 SONIOX_HINTS = ["hi", "en"]
+
+
+@functools.lru_cache(maxsize=1)
+def shared_tls() -> ssl.SSLContext:
+    """One secure-connection setup for every call. Making one reads the computer's
+    certificates, which freezes everything for tens of ms, and the lab's freeze check
+    counts that against live calls. Made once, before any call starts."""
+    return ssl.create_default_context()
+
+
+def _connect_options(url: str) -> dict[str, Any]:
+    """Nothing here may block the event loop during a live call: the shared secure
+    setup, and no search for a system proxy, which reads the Windows registry."""
+    options: dict[str, Any] = {"proxy": None}
+    if url.startswith("wss://"):
+        options["ssl"] = shared_tls()
+    return options
 
 
 class EarsError(Exception):
@@ -139,7 +158,8 @@ class Sarvam:
             settings["silence_duration_ms"] = self.silence_ms
         query = urlencode(settings)
         try:
-            async with websockets.connect(f"{self.url}?{query}", additional_headers={"API-SUBSCRIPTION-KEY": self.key}) as ws:
+            async with websockets.connect(f"{self.url}?{query}", additional_headers={"API-SUBSCRIPTION-KEY": self.key},
+                                          **_connect_options(self.url)) as ws:
 
                 async def send() -> None:
                     async for piece in pieces:
@@ -180,7 +200,7 @@ class Soniox:
     rate: int = 8000
 
     async def stream(self, pieces: AsyncIterator[bytes], heard: Heard) -> None:
-        async with websockets.connect(self.url, additional_headers={"Authorization": f"Bearer {self.key}"}) as ws:
+        async with websockets.connect(self.url, additional_headers={"Authorization": f"Bearer {self.key}"}, **_connect_options(self.url)) as ws:
             await ws.send(json.dumps({"model": SONIOX_MODEL, "audio_format": "s16le", "sample_rate": self.rate,
                                       "num_channels": 1, "language_hints": SONIOX_HINTS}))
 
@@ -217,7 +237,8 @@ class Deepgram:
     async def stream(self, pieces: AsyncIterator[bytes], heard: Heard) -> None:
         query = urlencode({"model": DEEPGRAM_MODEL, "language": "multi", "encoding": "linear16", "sample_rate": self.rate,
                            "channels": 1, "interim_results": "true"})
-        async with websockets.connect(f"{self.url}?{query}", additional_headers={"Authorization": f"Token {self.key}"}) as ws:
+        async with websockets.connect(f"{self.url}?{query}", additional_headers={"Authorization": f"Token {self.key}"},
+                                      **_connect_options(self.url)) as ws:
 
             async def send() -> None:
                 async for piece in pieces:

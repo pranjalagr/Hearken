@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from engine.tasks.caller_spec import CallerSpec, DropSpec, RaceSpec
+from engine.tasks.caller_spec import CallerSpec, DropSpec, NoiseSpec, RaceSpec
 from engine.tasks.task_file import Task, load_task, load_tasks
 from packs.food.pack import FoodPack
 
@@ -56,6 +56,7 @@ def test_a_full_caller_section_loads():
         number_style="hindi_pairs",
         opening_line="Haan hello, mera order cancel karna hai",
         tricks=("corrects_number_once",),
+        noise=NoiseSpec("traffic", "medium"),
     )
     assert task.race is None and task.drop is None
 

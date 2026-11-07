@@ -127,3 +127,99 @@ def speak_numbers(text: str, style: str) -> str:
         raise ValueError(f"unknown number style {style!r}")
     text = _MONEY.sub(lambda m: say_rupees(m.group(1)), text)
     return _ID.sub(lambda m: say_digits(m.group(0), style), text)
+
+
+# ---- the same words in Hindi letters, for the callers' voice ------------------------
+#
+# C4: on 4 Nov 2026 the callers' voice read all ten digits wrong in English letters
+# ("do" came out like "doo") and right in Hindi letters, judged by ear. English-letter
+# words above stay for the logs and tests of what the code means to say.
+
+HINDI_LETTERS_0_TO_99 = (
+    "शून्य", "एक", "दो", "तीन", "चार", "पांच", "छह", "सात", "आठ", "नौ",
+    "दस", "ग्यारह", "बारह", "तेरह", "चौदह", "पंद्रह", "सोलह", "सत्रह", "अठारह", "उन्नीस",
+    "बीस", "इक्कीस", "बाईस", "तेईस", "चौबीस", "पच्चीस", "छब्बीस", "सत्ताईस", "अट्ठाईस", "उनतीस",
+    "तीस", "इकतीस", "बत्तीस", "तैंतीस", "चौंतीस", "पैंतीस", "छत्तीस", "सैंतीस", "अड़तीस", "उनतालीस",
+    "चालीस", "इकतालीस", "बयालीस", "तैंतालीस", "चवालीस", "पैंतालीस", "छियालीस", "सैंतालीस", "अड़तालीस", "उनचास",
+    "पचास", "इक्यावन", "बावन", "तिरपन", "चौवन", "पचपन", "छप्पन", "सत्तावन", "अट्ठावन", "उनसठ",
+    "साठ", "इकसठ", "बासठ", "तिरसठ", "चौंसठ", "पैंसठ", "छियासठ", "सड़सठ", "अड़सठ", "उनहत्तर",
+    "सत्तर", "इकहत्तर", "बहत्तर", "तिहत्तर", "चौहत्तर", "पचहत्तर", "छिहत्तर", "सतहत्तर", "अठहत्तर", "उन्यासी",
+    "अस्सी", "इक्यासी", "बयासी", "तिरासी", "चौरासी", "पचासी", "छियासी", "सत्तासी", "अट्ठासी", "नवासी",
+    "नब्बे", "इक्यानवे", "बानवे", "तिरानवे", "चौरानवे", "पचानवे", "छियानवे", "सत्तानवे", "अट्ठानवे", "निन्यानवे",
+)
+# Said digit by digit, zero is "ज़ीरो": that's what was judged right by ear, and
+# how people read out an order number. "शून्य" stays for numbers as a whole.
+_ZERO_DIGIT = "ज़ीरो"
+_DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+
+
+def hindi_number_letters(n: int) -> str:
+    """hindi_number, in Hindi letters: 1250 -> "एक हज़ार दो सौ पचास"."""
+    if n < 0:
+        raise ValueError("no negative numbers on a phone call")
+    if n < 100:
+        return HINDI_LETTERS_0_TO_99[n]
+    words: list[str] = []
+    if n >= _CRORE:
+        words += [hindi_number_letters(n // _CRORE), "करोड़"]
+        n %= _CRORE
+    for size, name in ((_LAKH, "लाख"), (_HAZAAR, "हज़ार")):
+        if n >= size:
+            words += [HINDI_LETTERS_0_TO_99[n // size], name]
+            n %= size
+    if n >= _SAU:
+        words += [HINDI_LETTERS_0_TO_99[n // _SAU], "सौ"]
+        n %= _SAU
+    if n:
+        words.append(HINDI_LETTERS_0_TO_99[n])
+    return " ".join(words)
+
+
+def say_digits_letters(digits: str, style: str) -> str:
+    """say_digits, in Hindi letters. english_digits stays in English: those are
+    English words, and the voice reads them as English."""
+    if style == "english_digits":
+        return say_digits(digits, style)
+    if not digits.isdigit() or not digits.isascii():
+        raise ValueError(f"not digits: {digits!r}")
+    if style not in NUMBER_STYLES:
+        raise ValueError(f"unknown number style {style!r}")
+    single = lambda d: _ZERO_DIGIT if d == "0" else HINDI_LETTERS_0_TO_99[int(d)]  # noqa: E731
+    if style == "hindi_digits":
+        return " ".join(single(d) for d in digits)
+    groups = [digits[0]] if len(digits) % 2 else []
+    rest = digits[len(groups) :]
+    groups += [rest[i : i + 2] for i in range(0, len(rest), 2)]
+    words = []
+    for group in groups:
+        if len(group) == 1 or group[0] == "0":
+            words += [single(d) for d in group]
+        else:
+            words.append(HINDI_LETTERS_0_TO_99[int(group)])
+    return " ".join(words)
+
+
+def say_rupees_letters(amount: str) -> str:
+    """say_rupees, in Hindi letters: "249.50" -> "दो सौ उनचास रुपये पचास पैसे"."""
+    try:
+        value = Decimal(amount.replace(",", ""))
+    except InvalidOperation:
+        raise ValueError(f"not an amount: {amount!r}") from None
+    if value < 0 or value != value.quantize(Decimal("0.01")):
+        raise ValueError(f"not an amount in rupees and paise: {amount!r}")
+    rupees, paise = divmod(int(value * 100), 100)
+    parts = []
+    if rupees:
+        parts.append(f"{hindi_number_letters(rupees)} {'रुपया' if rupees == 1 else 'रुपये'}")
+    if paise:
+        parts.append(f"{hindi_number_letters(paise)} {'पैसा' if paise == 1 else 'पैसे'}")
+    return " ".join(parts) or "शून्य रुपये"
+
+
+def speak_numbers_letters(text: str, style: str) -> str:
+    """speak_numbers for a line written in Hindi letters: what the callers' voice reads."""
+    if style not in NUMBER_STYLES:
+        raise ValueError(f"unknown number style {style!r}")
+    text = text.translate(_DEVANAGARI_DIGITS)
+    text = _MONEY.sub(lambda m: say_rupees_letters(m.group(1)), text)
+    return _ID.sub(lambda m: say_digits_letters(m.group(0), style), text)

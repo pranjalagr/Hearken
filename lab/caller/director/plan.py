@@ -40,7 +40,8 @@ class DirectorSettings:
     drop_long_silence_s: float = 2.0
     drop_random_window_s: tuple[float, float] = (5.0, 60.0)
     # Words that tell the director the robot said the job is done ("after_done").
-    done_words: tuple[str, ...] = ("ho gaya", "ho chuka", "done")
+    # In Hindi letters too: that's how some ears write what they hear (ears test, 2 Nov 2026).
+    done_words: tuple[str, ...] = ("ho gaya", "ho chuka", "done", "हो गया", "हो चुका")
     # Words that make the caller's line a yes ("after_haan").
     yes_words: tuple[str, ...] = ("haan", "ji haan", "yes", "theek hai", "kar do")
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesAppendFrame, TTSSpeakFrame
@@ -28,10 +29,14 @@ from pipecat.transcriptions.language import Language
 
 from agents.agent_c.desk import JobDesk
 from agents.agent_c.job import Job, Turns
-from agents.agent_c.notebook import Notebook
+from agents.agent_c.notebook import Note, Notebook
 from agents.agent_c.settings import AgentCSettings
 from agents.agent_c.talker.ask_thinker import ASK_THINKER_SCHEMA, AskThinker
 from agents.agent_c.talker.feed import NoteFeed
+from agents.agent_c.talker.language import EarsLanguage, StickyLanguage
+from agents.agent_c.talker.mouth import Mouth
+from agents.agent_c.talker.note_view import NoteView
+from agents.agent_c.talker.speaker import Speaker
 from agents.agent_c.talker.speech_watch import SpeechWatch
 from agents.agent_c.thinker.brain import GeminiThinker, Step, ThinkerBrain
 from agents.agent_c.thinker.loop import Thinker, ThinkerLimits
@@ -44,9 +49,11 @@ from agents.common.tools import Tools
 from common.google import google_client
 from common.wire.protocol import PIECE_MS, SAMPLE_RATE, Cleared, End, Key, Played
 from common.wire.robot_line import CallerAudio, LineClosed, RobotLine
+from engine.contract.spoken import SpokenWords
 from engine.service.tool_catalog import CONFIRM, ToolSpec
 
 BrainMaker = Callable[[Sequence[ToolSpec]], ThinkerBrain]
+WORDS = Path(__file__).resolve().parent / "talker" / "words.yaml"
 
 
 @dataclass(frozen=True)
@@ -87,7 +94,8 @@ class CountedBrain:
 class AgentC:
     def __init__(self, settings: AgentCSettings, keys: Keys, tools: Tools, *,
                  box_settings: CallBoxSettings = CallBoxSettings(), diary: Diary = NO_DIARY,
-                 max_brain_requests: int = 40, brain_maker: BrainMaker | None = None) -> None:
+                 max_brain_requests: int = 40, brain_maker: BrainMaker | None = None,
+                 words: SpokenWords | None = None) -> None:
         self._settings = settings
         self._keys = keys
         self._tools = tools
@@ -95,12 +103,13 @@ class AgentC:
         self._diary = diary
         self._max_brain_requests = max_brain_requests  # the lab passes its own (lab/settings.yaml)
         self._brain_maker = brain_maker or self._gemini_thinker
+        self._words = words or SpokenWords()  # the call's pack's spoken words (cli/agent_c.py)
         self._limits = ThinkerLimits.from_settings(settings.section("thinker_limits"))
         self._heard_pieces = 0
         self.result: CallResult | None = None
 
     async def __call__(self, line: RobotLine) -> None:
-        call = CallParts(self._settings, self._diary)
+        call = CallParts(self._settings, self._diary, self._words)
         box = CallBox(self._box_settings, on_crash=call.desk.on_crash)
         try:
             self.result = await box.run(lambda b: self._main(line, b, call))
@@ -120,10 +129,10 @@ class AgentC:
             box.start("thinker", thinker.run(), crash_safe=True)
 
         call.desk.start_thinker = start_thinker
-        task = PipelineTask(self.pipeline(transport, call.desk),
+        task = PipelineTask(self.pipeline(transport, call),
                             params=PipelineParams(audio_in_sample_rate=SAMPLE_RATE, audio_out_sample_rate=SAMPLE_RATE,
                                                   enable_metrics=True, enable_usage_metrics=True),
-                            observers=[DiaryObserver(self._diary), cap,
+                            observers=[DiaryObserver(self._diary), cap, EarsLanguage(call.language),
                                        SpeechWatch(call.feed_replied, call.feed_speech_ended)])
 
         async def tell_talker(text: str) -> None:
@@ -152,7 +161,7 @@ class AgentC:
         self._diary.cost(model, prompt_tokens, "input tokens", by="thinker")
         self._diary.cost(model, answer_tokens, "output tokens", by="thinker")
 
-    def pipeline(self, transport: LineTransport, desk: JobDesk) -> Pipeline:
+    def pipeline(self, transport: LineTransport, call: CallParts) -> Pipeline:
         s = self._settings
         ears = SarvamRealtimeSTTService(
             api_key=self._keys.sarvam, sample_rate=SAMPLE_RATE,
@@ -164,7 +173,7 @@ class AgentC:
             settings=GoogleLLMService.Settings(
                 model=s.talker["model"], system_instruction=s.talker_prompt, temperature=s.talker["temperature"],
                 thinking=GoogleLLMService.ThinkingConfig(thinking_level="minimal")))
-        AskThinker(desk, self._diary).connect(talker)
+        AskThinker(call.desk, self._diary).connect(talker)
         voice = SarvamTTSService(api_key=self._keys.sarvam, sample_rate=SAMPLE_RATE,
                                  settings=SarvamTTSService.Settings(model=s.voice["model"], voice=s.voice["speaker"],
                                                                     language=Language(s.voice["language"])))
@@ -173,13 +182,14 @@ class AgentC:
 
         @turns.user().event_handler("on_user_turn_started")
         async def began(aggregator, strategy) -> None:
-            desk.caller_began()
+            call.desk.caller_began()
 
         @turns.user().event_handler("on_user_turn_stopped")
         async def finished(aggregator, strategy, message) -> None:
-            desk.caller_finished(message.content or "")
+            call.caller_finished(message.content or "")
 
-        return Pipeline([transport.input(), ears, turns.user(), talker, voice, transport.output(), turns.assistant()])
+        mouth = Mouth(call.speaker, context, self._diary)
+        return Pipeline([transport.input(), ears, turns.user(), talker, mouth, voice, transport.output(), turns.assistant()])
 
     async def _listen(self, line: RobotLine, transport: LineTransport, box: CallBox) -> None:
         async for event in line.events():
@@ -203,19 +213,36 @@ class AgentC:
 class CallParts:
     """One call's own pieces: its notebook, turns, job desk and note feed."""
 
-    def __init__(self, settings: AgentCSettings, diary: Diary) -> None:
+    def __init__(self, settings: AgentCSettings, diary: Diary, pack_words: SpokenWords) -> None:
         self.notebook = Notebook(int(settings.section("notebook")["max_notes"]))
         self.turns = Turns()
         self.desk = JobDesk(self.notebook, self.turns, self._no_thinker, diary)
         self._feed_wait_s = float(settings.section("feed")["wait_s"])
         self.feed: NoteFeed | None = None
+        # The pack's words (statuses, money) and Agent C's own (safe line, results), as one.
+        self.words = SpokenWords({**pack_words.groups, **SpokenWords.from_yaml(WORDS).groups})
+        self.language = StickyLanguage(int(settings.section("language")["min_words"]))
+        self.view = NoteView(self.words)
+        self.speaker = Speaker(self.words, self.view, self.language, int(settings.talker["max_sentences"]))
 
     @staticmethod
     def _no_thinker(job: Job, desk: JobDesk) -> None:
         raise RuntimeError("the Thinker is started only once the call has begun")
 
+    def caller_finished(self, words: str) -> None:
+        self.language.turn_finished(words)
+        self.speaker.heard(words)
+        self.desk.caller_finished(words)
+
+    def notes_line(self, notes: list[Note]) -> str:
+        """The Talker's view of new notes, with slots; the speaker learns it too, so the
+        number check knows every number the Talker was shown."""
+        line = "NOTES: " + "; ".join(self.view.line(note, self.language.value) for note in notes)
+        self.speaker.given(line)
+        return line
+
     def start_feed(self, push, box: CallBox) -> None:
-        self.feed = NoteFeed(self.notebook, self.desk, self.turns, push, self._feed_wait_s)
+        self.feed = NoteFeed(self.notebook, self.desk, self.turns, push, self._feed_wait_s, self.notes_line)
         box.start("feed", self.feed.run())
 
     def feed_replied(self) -> None:
@@ -225,3 +252,4 @@ class CallParts:
     def feed_speech_ended(self, cut: bool) -> None:
         if self.feed is not None:
             self.feed.speech_ended(cut)
+

@@ -11,6 +11,13 @@ talker:
   model: gemini-3.5-flash-lite
   # Decision 18: temperature 1.0, thinking minimal (what the week-1 Talker checks used).
   temperature: 1.0
+  # Decision 18: 1-2 sentences per reply, enforced by code (the mouth cuts the rest).
+  max_sentences: 2
+
+language:  # decision 10 (15 Nov 2026): the sticky call language
+  # A turn changes the language only with at least this many words: one "okay" or
+  # "thank you" in a Hinglish call must not flip it.
+  min_words: 4
 
 thinker:
   # The user's choice on 15 Nov 2026: Flash-Lite too (free tier, 500 requests a day).

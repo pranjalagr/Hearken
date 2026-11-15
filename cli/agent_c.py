@@ -31,6 +31,7 @@ from common.stopwatch import JsonlSink
 from common.wire.robot_line import RobotLine, bound_port, serve_robot
 from engine.storage.call_settings import read_call_settings
 from engine.storage.database import sqlite_session
+from packs.registry import get_pack
 
 
 async def main(args: argparse.Namespace) -> str:
@@ -40,11 +41,14 @@ async def main(args: argparse.Namespace) -> str:
     db_path = Path(args.db)
     sink = JsonlSink(Path(args.diary)) if args.diary else None
     async with sqlite_session(db_path) as db:
-        call_id = (await read_call_settings(db)).call_id
+        call_settings = await read_call_settings(db)
+    call_id = call_settings.call_id
+    words = get_pack(call_settings.pack).spoken_words()  # statuses and money said as the pack says them
     async with mcp_tools(db_path, args.bells, Path(args.backend_events) if args.backend_events else None) as tools:
         diary = Diary(call_id, sink) if sink else NO_DIARY
         box = CallBoxSettings(no_audio_s=args.no_audio_s, max_call_s=args.max_call_s, change_wait_s=args.change_wait_s)
-        robot = AgentC(settings, keys, tools, box_settings=box, diary=diary, max_brain_requests=args.max_brain_requests)
+        robot = AgentC(settings, keys, tools, box_settings=box, diary=diary, max_brain_requests=args.max_brain_requests,
+                       words=words)
         answered = asyncio.Event()
 
         async def answer(line: RobotLine) -> None:

@@ -1,0 +1,53 @@
+# Agent C's own fixed words, in the same shape as a pack's spoken.yaml (checked the same
+# way on load: both languages, English letters, the same {slots} in each).
+# Change wording here, never in code.
+
+# Lines code plays itself, never written by the Talker.
+line:
+  # Decision 8: a reply with a made-up number or a slot no note gave is never spoken.
+  # "Checking" is always true while a job is open, and promises nothing.
+  safe:
+    hinglish: "Ek second, main check kar raha hoon."
+    english: "One moment, let me check."
+
+# Decision 8: outcomes come only from the [result] slot, filled by code from the
+# backend's latest answer for that action. Four outcomes per action:
+# done, refused (the reason stays in the note), stopped (the Guard stopped it before
+# sending), unknown (still saving, or no answer: never "done" when unsure).
+result:
+  cancel_order_done:
+    hinglish: "Aapka order cancel ho gaya hai."
+    english: "Your order has been cancelled."
+  cancel_order_refused:
+    hinglish: "Order cancel nahi hua."
+    english: "The order could not be cancelled."
+  cancel_order_stopped:
+    hinglish: "Maine order cancel nahi kiya."
+    english: "I have not cancelled the order."
+  cancel_order_unknown:
+    hinglish: "Ek second, main check kar raha hoon ki cancel hua ya nahi."
+    english: "One moment, I am checking whether the cancellation went through."
+  refund_order_done:
+    hinglish: "Refund ho gaya hai."
+    english: "The refund has been sent."
+  refund_order_refused:
+    hinglish: "Refund nahi hua."
+    english: "The refund could not be sent."
+  refund_order_stopped:
+    hinglish: "Maine refund nahi kiya."
+    english: "I have not sent the refund."
+  refund_order_unknown:
+    hinglish: "Ek second, main check kar raha hoon ki refund hua ya nahi."
+    english: "One moment, I am checking whether the refund went through."
+  change_address_done:
+    hinglish: "Address badal gaya hai."
+    english: "The address has been changed."
+  change_address_refused:
+    hinglish: "Address nahi badla."
+    english: "The address could not be changed."
+  change_address_stopped:
+    hinglish: "Maine address nahi badla."
+    english: "I have not changed the address."
+  change_address_unknown:
+    hinglish: "Ek second, main check kar raha hoon ki address badla ya nahi."
+    english: "One moment, I am checking whether the address was changed."

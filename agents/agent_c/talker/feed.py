@@ -32,8 +32,9 @@ def notes_line(notes: list[Note]) -> str:
 
 class NoteFeed:
     def __init__(self, notebook: Notebook, desk: JobDesk, turns: Turns, push: Callable[[str], Awaitable[None]],
-                 wait_s: float) -> None:
+                 wait_s: float, render: Callable[[list[Note]], str] = notes_line) -> None:
         self._notebook = notebook
+        self._render = render  # build step 3: the note view, with slots
         self._desk = desk
         self._turns = turns
         self._push = push
@@ -70,7 +71,7 @@ class NoteFeed:
         if ready:
             self._given = max(note.number for note in ready)
             self._replied_after_giving = False
-            await self._push(notes_line(ready))
+            await self._push(self._render(ready))
 
     # ---- what the speech watch reports ------------------------------------------
 

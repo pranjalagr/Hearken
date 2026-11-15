@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pipecat.frames.frames import TTSSpeakFrame
 
-from agents.agent_c.robot import AgentC, Keys, talker_tools
+from agents.agent_c.robot import AgentC, CallParts, Keys, talker_tools
 from agents.agent_c.settings import load_settings
 from agents.agent_c.talker.ask_thinker import ASK_THINKER, AskThinker
 from agents.common.diary import Diary
@@ -53,7 +53,7 @@ def test_the_talker_holds_exactly_one_tool_ask_thinker():
 
 def test_the_pipeline_builds_without_a_network_and_in_agent_as_order():
     robot = AgentC(load_settings(), Keys("fake-gemini", "fake-sarvam"), FakeTools())
-    pipeline = robot.pipeline(LineTransport(FakeLine()))
+    pipeline = robot.pipeline(LineTransport(FakeLine()), CallParts(load_settings(), Diary("c1", ListSink())).desk)
     names = [type(p).__name__ for p in pipeline.processors if type(p).__name__ not in ("PipelineSource", "PipelineSink")]
     assert names[0] == "LineInput" and names[-1] == "LLMAssistantAggregator", names
     assert names.index("GoogleLLMService") < names.index("SarvamTTSService") < names.index("LineOutput"), names

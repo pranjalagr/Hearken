@@ -27,3 +27,18 @@ voice:  # decision 12, the same as Agent A's
   model: bulbul:v4-flash
   speaker: sunny_enhi_customer
   language: hi-IN
+
+thinker_limits:  # decision 30 (time limits), decision 19 (retries)
+  step_s: 8.0  # one Thinker step (decision 30: ~8 s, a starting guess)
+  step_retries: 1  # then a "failed" note and a hand-over
+  lookup_s: 5.0  # one lookup or prepare tool (the backend's own normal delay is 0.3 s)
+  idle_wait_s: 1.0  # one wait for news; the loop looks again after it, so a missed ring costs at most this
+
+notebook:
+  max_notes: 200  # decision 7: no call needs more; past it something is going round in circles
+
+feed:
+  wait_s: 0.5  # one wait for a new note; the feed looks again after it
+
+# The pack's hand-over tool (decision 13). A name, so it lives here, not in code.
+hand_over_tool: hand_over_to_human

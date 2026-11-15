@@ -11,6 +11,7 @@ import yaml
 
 HERE = Path(__file__).resolve().parent
 TALKER_PROMPTS = HERE / "talker" / "prompts"
+THINKER_PROMPT = HERE / "thinker" / "prompts" / "thinker.md"
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class AgentCSettings:
     ears: dict[str, Any]
     voice: dict[str, Any]
     talker_prompt: str
+    thinker_prompt: str
     raw: dict[str, Any]  # the whole file, for the sections each part reads itself
 
     @property
@@ -38,7 +40,8 @@ def talker_prompt(folder: Path = TALKER_PROMPTS) -> str:
     return (folder / "role.md").read_text(encoding="utf-8").strip() + "\n\n" + (folder / "style.md").read_text(encoding="utf-8")
 
 
-def load_settings(path: Path = HERE / "settings.yaml", prompts: Path = TALKER_PROMPTS) -> AgentCSettings:
+def load_settings(path: Path = HERE / "settings.yaml", prompts: Path = TALKER_PROMPTS,
+                  thinker: Path = THINKER_PROMPT) -> AgentCSettings:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     return AgentCSettings(data["greeting"], data["talker"], data["thinker"], data["ears"], data["voice"],
-                          talker_prompt(prompts), data)
+                          talker_prompt(prompts), thinker.read_text(encoding="utf-8"), data)

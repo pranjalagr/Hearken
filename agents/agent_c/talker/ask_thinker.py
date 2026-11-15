@@ -52,9 +52,3 @@ class AskThinker:
         # The Talker speaks next ("ek second"), from this answer alone.
         await params.result_callback({"status": status})
 
-
-class NoThinkerYet:
-    """Build step 1: no Thinker, so every request is only written down."""
-
-    def open_job(self, request: str) -> str:
-        return "noted: the back office has no answer yet; say you are checking"

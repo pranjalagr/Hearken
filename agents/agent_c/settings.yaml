@@ -49,3 +49,15 @@ feed:
 
 # The pack's hand-over tool (decision 13). A name, so it lives here, not in code.
 hand_over_tool: hand_over_to_human
+
+guard:  # decisions 20-23
+  judge_model: gemini-3.5-flash-lite  # the one-word judge (decision 21)
+  judge_s: 1.0  # decision 30: ~1 s, then "unclear", never a yes
+  # After an answer that needs asking again, the Talker replies first; then the Guard asks.
+  # A starting guess: about one short Talker line.
+  reask_wait_s: 1.5
+  # Pipecat's Silero voice detector needs this much speech before it says "the caller
+  # started" (its VAD_START_SECS default), so the words began that long before.
+  vad_start_s: 0.2
+  # Decision 21: a no or a stop needs only one voice; these on the partial words are one.
+  stop_words: {ruko: stop, mat: stop, wait: stop, stop: stop, nahi: "no"}

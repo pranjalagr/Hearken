@@ -9,6 +9,18 @@ line:
   safe:
     hinglish: "Ek second, main check kar raha hoon."
     english: "One moment, let me check."
+  # Decision 23, the asking ladder: ask 1 is the backend's own full question; then these.
+  ask_again:
+    hinglish: "Maaf kijiye, sunai nahi diya. Haan ya nahi?"
+    english: "Sorry, I did not catch that. Yes or no?"
+  ask_keypad:
+    hinglish: "Haan ke liye 1 dabaiye, nahi ke liye 2."
+    english: "Press 1 for yes, 2 for no."
+  # Decision 22: a "haan" that began before the question finished never counts; if the
+  # caller then stays quiet, this is asked.
+  ask_short:
+    hinglish: "Haan ya nahi?"
+    english: "Yes or no?"
 
 # Decision 8: outcomes come only from the [result] slot, filled by code from the
 # backend's latest answer for that action. Four outcomes per action:

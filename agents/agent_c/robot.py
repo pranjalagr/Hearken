@@ -28,6 +28,9 @@ from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.transcriptions.language import Language
 
 from agents.agent_c.desk import JobDesk
+from agents.agent_c.guard.guard import Door, Guard, GuardSettings
+from agents.agent_c.guard.judge import TimedJudge, YesJudge, gemini_ask
+from agents.agent_c.guard.partial_words import PartialWords
 from agents.agent_c.job import Job, Turns
 from agents.agent_c.notebook import Note, Notebook
 from agents.agent_c.settings import AgentCSettings
@@ -54,6 +57,7 @@ from engine.service.tool_catalog import CONFIRM, ToolSpec
 
 BrainMaker = Callable[[Sequence[ToolSpec]], ThinkerBrain]
 WORDS = Path(__file__).resolve().parent / "talker" / "words.yaml"
+JUDGE_PROMPT = Path(__file__).resolve().parent / "guard" / "prompts" / "judge.md"
 
 
 @dataclass(frozen=True)
@@ -95,7 +99,7 @@ class AgentC:
     def __init__(self, settings: AgentCSettings, keys: Keys, tools: Tools, *,
                  box_settings: CallBoxSettings = CallBoxSettings(), diary: Diary = NO_DIARY,
                  max_brain_requests: int = 40, brain_maker: BrainMaker | None = None,
-                 words: SpokenWords | None = None) -> None:
+                 words: SpokenWords | None = None, door: Door | None = None, judge: YesJudge | None = None) -> None:
         self._settings = settings
         self._keys = keys
         self._tools = tools
@@ -104,6 +108,10 @@ class AgentC:
         self._max_brain_requests = max_brain_requests  # the lab passes its own (lab/settings.yaml)
         self._brain_maker = brain_maker or self._gemini_thinker
         self._words = words or SpokenWords()  # the call's pack's spoken words (cli/agent_c.py)
+        # The Guard's private door, from cli/agent_c.py: plain code only, never a tool (decision 7).
+        self._door = door
+        self._judge = judge
+        self._guard_settings = GuardSettings.from_settings(settings.section("guard"))
         self._limits = ThinkerLimits.from_settings(settings.section("thinker_limits"))
         self._heard_pieces = 0
         self.result: CallResult | None = None
@@ -133,14 +141,24 @@ class AgentC:
                             params=PipelineParams(audio_in_sample_rate=SAMPLE_RATE, audio_out_sample_rate=SAMPLE_RATE,
                                                   enable_metrics=True, enable_usage_metrics=True),
                             observers=[DiaryObserver(self._diary), cap, EarsLanguage(call.language),
-                                       SpeechWatch(call.feed_replied, call.feed_speech_ended)])
+                                       SpeechWatch(call.feed_replied, call.speech_ended), PartialWords(call.partial_words)])
 
         async def tell_talker(text: str) -> None:
             self._diary.decision("notes to talker", text=text)
             await task.queue_frames([LLMMessagesAppendFrame([{"role": "user", "content": text}], run_llm=True)])
 
+        async def say(text: str) -> None:
+            """A line code wrote (the yes-question): straight to the voice, and into the
+            Talker's history, so it knows what the caller heard."""
+            call.speaker.heard(text)  # numbers the caller heard from the backend may be repeated
+            await task.queue_frames([TTSSpeakFrame(text)])
+
+        if self._door is not None:
+            call.guard = Guard(self._door, self._tools, box, call.notebook, call.desk, self._yes_judge(cap), call.words,
+                               call.language, say, line.send_mark, self._guard_settings, self._diary)
+            call.desk.on_prepared = call.guard.prepared
         call.start_feed(tell_talker, box)
-        box.start("ears", self._listen(line, transport, box))
+        box.start("ears", self._listen(line, transport, box, call))
         # Every robot opens the same way, with a fixed line (decision 13).
         await task.queue_frames([TTSSpeakFrame(self._settings.greeting)])
         await PipelineRunner(handle_sigint=False).run(task)
@@ -150,6 +168,14 @@ class AgentC:
         self._diary.decision("hang up", reason=BRAIN_CAP, requests=requests)
         await line.end(BRAIN_CAP)
         box.end(BRAIN_CAP)
+
+    def _yes_judge(self, cap: BrainCap) -> YesJudge:
+        if self._judge is not None:
+            return self._judge
+        section = self._settings.section("guard")
+        client = google_client(self._keys.gemini, float(section["judge_s"]))
+        ask = gemini_ask(client, section["judge_model"], JUDGE_PROMPT.read_text(encoding="utf-8"))
+        return TimedJudge(ask, float(section["judge_s"]), lambda: cap.add(1), self._diary.error)
 
     def _gemini_thinker(self, tools: Sequence[ToolSpec]) -> ThinkerBrain:
         client = google_client(self._keys.gemini, self._limits.step_s)
@@ -182,7 +208,7 @@ class AgentC:
 
         @turns.user().event_handler("on_user_turn_started")
         async def began(aggregator, strategy) -> None:
-            call.desk.caller_began()
+            call.caller_began()
 
         @turns.user().event_handler("on_user_turn_stopped")
         async def finished(aggregator, strategy, message) -> None:
@@ -191,23 +217,21 @@ class AgentC:
         mouth = Mouth(call.speaker, context, self._diary)
         return Pipeline([transport.input(), ears, turns.user(), talker, mouth, voice, transport.output(), turns.assistant()])
 
-    async def _listen(self, line: RobotLine, transport: LineTransport, box: CallBox) -> None:
+    async def _listen(self, line: RobotLine, transport: LineTransport, box: CallBox, call: CallParts) -> None:
         async for event in line.events():
             if isinstance(event, CallerAudio):
                 box.heard_audio()
                 self._heard_pieces += 1
+                call.caller_ms = event.caller_ms
                 await transport.input().feed(event.piece)
             elif isinstance(event, (Played, Cleared, Key)):
-                self.on_receipt(event)
+                call.receipt(event)
             elif isinstance(event, End):
                 box.end(f"caller:{event.reason}")
                 return
             elif isinstance(event, LineClosed):
                 box.end("line closed")
                 return
-
-    def on_receipt(self, event: Played | Cleared | Key) -> None:
-        """The caller's receipts and keys: the Guard reads these from build step 4."""
 
 
 class CallParts:
@@ -224,15 +248,39 @@ class CallParts:
         self.language = StickyLanguage(int(settings.section("language")["min_words"]))
         self.view = NoteView(self.words)
         self.speaker = Speaker(self.words, self.view, self.language, int(settings.talker["max_sentences"]))
+        self.guard: Guard | None = None  # set once the call has begun, when the robot holds a door
+        self.caller_ms = 0  # the newest caller piece heard, on the caller's clock (the wire's caller_ms)
 
     @staticmethod
     def _no_thinker(job: Job, desk: JobDesk) -> None:
         raise RuntimeError("the Thinker is started only once the call has begun")
 
+    def caller_began(self) -> None:
+        self.desk.caller_began()
+        if self.guard is not None:
+            self.guard.turn_began(self.caller_ms)
+
     def caller_finished(self, words: str) -> None:
         self.language.turn_finished(words)
         self.speaker.heard(words)
         self.desk.caller_finished(words)
+        if self.guard is not None:
+            self.guard.turn_finished(words)
+
+    def partial_words(self, words: str) -> None:
+        if self.guard is not None:
+            self.guard.partial(words)
+
+    def receipt(self, event: Played | Cleared | Key) -> None:
+        """The caller's receipts and keys, for the Guard's timing (decision 22)."""
+        if self.guard is None:
+            return
+        if isinstance(event, Played):
+            self.guard.played(event.name, event.caller_ms)
+        elif isinstance(event, Cleared):
+            self.guard.cleared(event.dropped_marks)
+        else:
+            self.guard.key(event.digit, event.caller_ms)
 
     def notes_line(self, notes: list[Note]) -> str:
         """The Talker's view of new notes, with slots; the speaker learns it too, so the
@@ -242,14 +290,17 @@ class CallParts:
         return line
 
     def start_feed(self, push, box: CallBox) -> None:
-        self.feed = NoteFeed(self.notebook, self.desk, self.turns, push, self._feed_wait_s, self.notes_line)
+        self.feed = NoteFeed(self.notebook, self.desk, self.turns, push, self._feed_wait_s, self.notes_line,
+                             hold=lambda: self.guard is not None and self.guard.asking)
         box.start("feed", self.feed.run())
 
     def feed_replied(self) -> None:
         if self.feed is not None:
             self.feed.talker_replied()
 
-    def feed_speech_ended(self, cut: bool) -> None:
+    def speech_ended(self, cut: bool, spoken: str) -> None:
         if self.feed is not None:
             self.feed.speech_ended(cut)
+        if self.guard is not None:
+            self.guard.speech_ended(cut, spoken)
 

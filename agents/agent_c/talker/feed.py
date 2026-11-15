@@ -32,8 +32,10 @@ def notes_line(notes: list[Note]) -> str:
 
 class NoteFeed:
     def __init__(self, notebook: Notebook, desk: JobDesk, turns: Turns, push: Callable[[str], Awaitable[None]],
-                 wait_s: float, render: Callable[[list[Note]], str] = notes_line) -> None:
+                 wait_s: float, render: Callable[[list[Note]], str] = notes_line,
+                 hold: Callable[[], bool] = lambda: False) -> None:
         self._notebook = notebook
+        self._hold = hold  # build step 4: True while the Guard's yes-question is open
         self._render = render  # build step 3: the note view, with slots
         self._desk = desk
         self._turns = turns
@@ -50,8 +52,11 @@ class NoteFeed:
             await self._notebook.wait(self._wait_s)
 
     async def give_new_notes(self) -> None:
-        if self._turns.speaking:
-            return  # the turn's end rings the notebook again
+        if self._turns.speaking or self._hold():
+            # The turn's end, or the Guard's answer, rings the notebook again. While a
+            # yes-question is open the Talker gets nothing new: a Thinker line such as
+            # "asked the caller" must not be spoken over the question.
+            return
         job = self._desk.job
         version = job.version if job is not None else 0
         ready: list[Note] = []

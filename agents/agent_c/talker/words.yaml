@@ -21,6 +21,10 @@ line:
   ask_short:
     hinglish: "Haan ya nahi?"
     english: "Yes or no?"
+  # Decision 13: said once, then the call ends.
+  hand_over:
+    hinglish: "Main aapko hamare team member se connect kar raha hoon. Kripya line par bane rahiye."
+    english: "I am connecting you to a team member. Please stay on the line."
 
 # Decision 8: outcomes come only from the [result] slot, filled by code from the
 # backend's latest answer for that action. Four outcomes per action:

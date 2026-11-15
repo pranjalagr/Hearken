@@ -9,10 +9,12 @@ run it without a call box or a brain.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from agents.agent_c.job import ANSWER_GIVEN, CLOSED, OPEN, Job, StepMark, Turns, failing_checks
 from agents.agent_c.notebook import CALLER, FAILED, REQUEST, Note, Notebook
 from agents.common.diary import Diary
+from engine.service.replies import ERROR, ToolReply
 
 STARTED = "started: the back office is on it; say you are checking"
 PASSED_ON = "passed on: the back office is already on this call's request and has these words too"
@@ -30,6 +32,7 @@ class JobDesk:
         self.job: Job | None = None
         self._waiting_reply: tuple[StepMark, int] | None = None  # (step, reply note) waiting to be spoken
         self.on_prepared: Callable[[Note], Awaitable[None]] | None = None  # the Guard, from build step 4
+        self.on_hand_over: Callable[[str, Any], Awaitable[ToolReply]] | None = None  # the call's one hand-over
 
     # ---- the Talker's side ------------------------------------------------------
 
@@ -99,6 +102,12 @@ class JobDesk:
     async def prepared(self, note: Note) -> None:
         if self.on_prepared is not None:
             await self.on_prepared(note)
+
+    async def hand_over(self, reason: str, order_no: Any = None) -> ToolReply:
+        if self.on_hand_over is None:
+            self.end_job(reason)
+            return ToolReply(ERROR, "No hand-over on this line.")
+        return await self.on_hand_over(reason, order_no)
 
     # ---- ending -----------------------------------------------------------------
 

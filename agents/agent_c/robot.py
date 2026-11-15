@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesAppendFrame, TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -33,6 +33,7 @@ from agents.agent_c.desk import JobDesk
 from agents.agent_c.guard.guard import Door, Guard, GuardSettings
 from agents.agent_c.guard.judge import TimedJudge, YesJudge, gemini_ask
 from agents.agent_c.guard.partial_words import PartialWords
+from agents.agent_c.hand_over import HANDED_OVER, HandOver
 from agents.agent_c.job import Job, Turns
 from agents.agent_c.notebook import Note, Notebook
 from agents.agent_c.settings import AgentCSettings
@@ -125,7 +126,7 @@ class AgentC:
 
     async def __call__(self, line: RobotLine) -> None:
         call = CallParts(self._settings, self._diary, self._words, self._stop_model)
-        box = CallBox(self._box_settings, on_crash=call.desk.on_crash)
+        box = CallBox(self._box_settings, on_crash=call.crashed)
         try:
             self.result = await box.run(lambda b: self._main(line, b, call))
         finally:
@@ -140,7 +141,8 @@ class AgentC:
         names = {spec.name for spec in allowed}
 
         def start_thinker(job: Job, desk: JobDesk) -> None:
-            thinker = Thinker(job, call.notebook, brain, self._tools, names, desk, self._limits, self._diary)
+            thinker = Thinker(job, call.notebook, brain, self._tools, names, desk, self._limits, self._diary,
+                              hand_over_tool=self._settings.raw["hand_over_tool"])
             box.start("thinker", thinker.run(), crash_safe=True)
 
         call.desk.start_thinker = start_thinker
@@ -160,15 +162,28 @@ class AgentC:
             call.speaker.heard(text)  # numbers the caller heard from the backend may be repeated
             await task.queue_frames([TTSSpeakFrame(text)])
 
+        async def say_and_end(text: str) -> None:
+            """The hand-over line, then the end: the pipeline ends once it has played."""
+            call.speaker.heard(text)
+            await task.queue_frames([TTSSpeakFrame(text), EndFrame()])
+
+        call.hand_over = HandOver(self._tools, self._settings.raw["hand_over_tool"], call.desk, say_and_end,
+                                  lambda: call.words.phrase("line", "hand_over", call.language.value), self._diary)
+        call.box = box
+        call.desk.on_hand_over = call.hand_over.now
         if self._door is not None:
             call.guard = Guard(self._door, self._tools, box, call.notebook, call.desk, self._yes_judge(cap), call.words,
-                               call.language, say, line.send_mark, self._guard_settings, self._diary)
+                               call.language, say, line.send_mark, self._guard_settings, self._diary,
+                               hand_over=call.hand_over.now)
             call.desk.on_prepared = call.guard.prepared
         call.start_feed(tell_talker, box)
         box.start("ears", self._listen(line, transport, box, call))
         # Every robot opens the same way, with a fixed line (decision 13).
         await task.queue_frames([TTSSpeakFrame(self._settings.greeting)])
         await PipelineRunner(handle_sigint=False).run(task)
+        if call.hand_over.done:
+            # Handed over and the line has played: say so on the wire (decision 13).
+            await line.end(HANDED_OVER)
 
     async def _cap_reached(self, line: RobotLine, box: CallBox, requests: int) -> None:
         # As Agent A: the wire first, so the lab records why the call ended, then the box.
@@ -266,6 +281,8 @@ class CallParts:
         self.view = NoteView(self.words)
         self.speaker = Speaker(self.words, self.view, self.language, int(settings.talker["max_sentences"]))
         self.guard: Guard | None = None  # set once the call has begun, when the robot holds a door
+        self.hand_over: HandOver | None = None  # set once the call has begun
+        self.box: CallBox | None = None
         self._diary = diary
         self.switch = StopSwitch(name="stop-switch")
         self.speech = SpeechWatch(self.feed_replied, self.speech_ended)
@@ -275,6 +292,13 @@ class CallParts:
             self.stop_listener = StopListener(stop_model, float(stop["line"]), float(stop["window_s"]), float(stop["every_s"]),
                                               self.stop_talking, lambda ms: diary.error(f"stop check took {ms:.0f} ms"))
         self.caller_ms = 0  # the newest caller piece heard, on the caller's clock (the wire's caller_ms)
+
+    def crashed(self, task: str, error: BaseException) -> None:
+        """A crash-safe task (the Thinker) crashed: its job ends with a "failed" note,
+        and the caller is handed over, once."""
+        self.desk.on_crash(task, error)
+        if self.hand_over is not None and self.box is not None:
+            self.box.start("hand over", self.hand_over.now("the back office stopped working"))
 
     @staticmethod
     def _no_thinker(job: Job, desk: JobDesk) -> None:

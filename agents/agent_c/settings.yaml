@@ -40,6 +40,10 @@ thinker_limits:  # decision 30 (time limits), decision 19 (retries)
   step_retries: 1  # then a "failed" note and a hand-over
   lookup_s: 5.0  # one lookup or prepare tool (the backend's own normal delay is 0.3 s)
   idle_wait_s: 1.0  # one wait for news; the loop looks again after it, so a missed ring costs at most this
+  lookup_retries: 1  # decision 19: a lookup that failed or timed out is tried once more
+  # Decision 19: "same tool, inputs and answer repeat twice in a row: stop, one hand-over".
+  # Read as the first time plus two repeats; Agent A's food_05 made 7 identical hand-over calls.
+  same_call_limit: 3
 
 notebook:
   max_notes: 200  # decision 7: no call needs more; past it something is going round in circles
@@ -61,6 +65,10 @@ guard:  # decisions 20-23
   vad_start_s: 0.2
   # Decision 21: a no or a stop needs only one voice; these on the partial words are one.
   stop_words: {ruko: stop, mat: stop, wait: stop, stop: stop, nahi: "no"}
+  # Decision 19: a confirm that got no answer is sent again with the same token, up to
+  # this many more times (the backend answers "already_done" if the first one saved).
+  change_retries: 2
+  expired_reprepares: 1  # decision 19: "expired -> prepare again, ask again", once
 
 stop_check:  # decision 26: the haan-ruko model (Part 4, v4) while the robot talks
   # The trained model, outside git (cli/haan_ruko.py train writes it here). Without the

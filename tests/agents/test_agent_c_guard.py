@@ -62,9 +62,14 @@ class Rig:
         async def send_mark(name):
             self.marks.append(name)
 
+        self.handed_over = []
+
+        async def hand_over(why):
+            self.handed_over.append(why)
+
         self.guard = Guard(kit.guard, BackendTools(kit.backend), self.box, self.book, self.desk, judge,
                            SpokenWords.from_yaml(WORDS), StickyLanguage(4), say, send_mark, SETTINGS,
-                           Diary("c1", self.sink))
+                           Diary("c1", self.sink), hand_over=hand_over)
 
     async def prepare(self):
         call = ToolCall("prepare_cancel_order", RAHUL)
@@ -163,8 +168,8 @@ async def test_unclear_climbs_the_ladder_to_the_keypad_and_then_a_human(open_cal
         assert rig.said[-1] == asked
     await rig.question_played()
     await rig.caller_says("hmm", started_ms=5200)
-    assert "hand over to a human" in rig.book.last((YES_ANSWER,)).text
     assert rig.results()[0].data["outcome"] == STOPPED
+    assert rig.handed_over == ["no clear yes or no, even on the keypad"]  # build step 6: the one hand-over
 
 
 async def test_a_keypad_1_after_the_question_played_is_a_yes(open_call):

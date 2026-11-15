@@ -13,7 +13,11 @@ prepares a change, the Guard:
 4. on a real yes, gets a yes-ticket and presses confirm at once, shielded by the call
    box: a caller cutting in never cancels a change already sent (decision 17), and
    the outcome comes only from the backend's answer, as a [result] note;
-5. asks again on "unclear": once in full, once short, then the keypad, then a human.
+5. asks again on "unclear": once in full, once short, then the keypad, then a human;
+6. follows the retry table (decision 19): a confirm with no answer is sent again with
+   the same token (the backend answers "already done" if the first one saved); an
+   expired token is prepared again and asked again; still unsure -> the truth and
+   one hand-over, never "done".
 
 Every yes-moment is written to the diary (question, words, label, timing).
 """
@@ -34,8 +38,8 @@ from agents.common.diary import Diary
 from agents.common.tools import Tools
 from engine.contract.spoken import SpokenWords
 from engine.safety.guard_door import TicketRefused
-from engine.service.replies import ALREADY_DONE, OK, REFUSED, ToolReply
-from engine.service.tool_catalog import CONFIRM
+from engine.service.replies import ALREADY_DONE, EXPIRED, OK, REFUSED, ToolReply
+from engine.service.tool_catalog import CONFIRM, PREPARE_PREFIX
 
 DONE, REFUSED_OUTCOME, STOPPED, UNKNOWN_OUTCOME = "done", "refused", "stopped", "unknown"
 FULL, AGAIN, KEYPAD = 1, 2, 3  # the asking ladder; past the keypad, a human
@@ -65,10 +69,13 @@ class GuardSettings:
     reask_wait_s: float  # after an answer, how long to let the Talker reply before asking again
     vad_start_s: float  # how much speech the voice detector needs before it says "speaking"
     stop_words: Mapping[str, str]  # word -> "no" or "stop"
+    change_retries: int = 2  # decision 19: a confirm with no answer, sent again with the same token
+    expired_reprepares: int = 1  # decision 19: an expired token is prepared again and asked again
 
     @classmethod
     def from_settings(cls, section: dict[str, Any]) -> GuardSettings:
-        return cls(float(section["reask_wait_s"]), float(section["vad_start_s"]), dict(section["stop_words"]))
+        return cls(float(section["reask_wait_s"]), float(section["vad_start_s"]), dict(section["stop_words"]),
+                   int(section["change_retries"]), int(section["expired_reprepares"]))
 
 
 @dataclass
@@ -76,6 +83,8 @@ class YesMoment:
     token: str
     action: str
     question: str  # the full question, in the call's language when it was first asked
+    inputs: dict[str, Any] = field(default_factory=dict)  # what was prepared, to prepare it again if it expires
+    reprepared: int = 0
     level: int = FULL
     asking: str = ""  # the words of the newest ask
     mark: str = ""
@@ -89,7 +98,8 @@ class YesMoment:
 class Guard:
     def __init__(self, door: Door, tools: Tools, box: Box, notebook: Notebook, desk: JobDesk, judge: YesJudge,
                  words: SpokenWords, language: StickyLanguage, say: Callable[[str], Awaitable[None]],
-                 send_mark: Callable[[str], Awaitable[None]], settings: GuardSettings, diary: Diary) -> None:
+                 send_mark: Callable[[str], Awaitable[None]], settings: GuardSettings, diary: Diary,
+                 hand_over: Callable[[str], Awaitable[Any]] | None = None) -> None:
         self._door = door
         self._tools = tools
         self._box = box
@@ -102,6 +112,7 @@ class Guard:
         self._send_mark = send_mark
         self._settings = settings
         self._diary = diary
+        self._hand_over = hand_over
         self.moment: YesMoment | None = None  # a yes-question being asked
         self.confirming: YesMoment | None = None  # a yes taken, its ticket being confirmed
         self._marks = 0
@@ -118,7 +129,7 @@ class Guard:
     async def prepared(self, note: Note) -> None:
         token = str(note.data["data"]["token"])
         question = await self._door.question(token, self._language.value)
-        self.moment = YesMoment(token, str(note.data["action"]), question)
+        self.moment = YesMoment(token, str(note.data["action"]), question, inputs=dict(note.data.get("inputs") or {}))
         await self._ask()
 
     # ---- what the call reports ---------------------------------------------------
@@ -214,8 +225,8 @@ class Guard:
         else:  # unclear
             moment.level += 1
             if moment.level > KEYPAD:
-                await self._stopped(moment, UNCLEAR, words,
-                                    "No clear answer after asking three times and the keypad: hand over to a human.")
+                await self._stopped(moment, UNCLEAR, words, "no clear answer after asking three times and the keypad")
+                await self._give_up("no clear yes or no, even on the keypad")
             else:
                 self._ask_soon()
 
@@ -226,32 +237,49 @@ class Guard:
             moment.ticket = await self._door.issue_ticket(moment.token)
         except TicketRefused as refused:
             self.confirming = None
-            self._result(moment, REFUSED_OUTCOME, str(refused))
+            if "expired" in str(refused):
+                # The door's own words (engine/safety/guard_door.py): the token ran out while
+                # the question was asked. Decision 19: prepare again, ask again.
+                await self._prepare_again(moment)
+            else:
+                self._result(moment, REFUSED_OUTCOME, str(refused))
             return
         try:
-            await self._confirm(moment)
+            outcome = await self._confirm(moment)
         finally:
             self.confirming = None
+        if outcome == EXPIRED:
+            await self._prepare_again(moment)
+        elif outcome == UNKNOWN_OUTCOME:
+            await self._give_up("the change's result is unknown")
 
-    async def _confirm(self, moment: YesMoment) -> None:
-        """Pressed by code the instant the ticket exists (decision 17), shielded."""
+    async def _confirm(self, moment: YesMoment) -> str:
+        """Pressed by code the instant the ticket exists (decision 17), shielded. With no
+        answer it is sent again with the same token: the backend checks "already done"
+        first, so a confirm that did save is never done twice."""
         job = self._desk.job
         if job is not None:
             job.change_sent()
         outcome, reason = UNKNOWN_OUTCOME, ""
         try:
-            reply = await self._box.change(f"{CONFIRM}:{moment.action}",
-                                           self._tools.call(CONFIRM, {"token": moment.token, "ticket": moment.ticket}))
-            outcome, reason = self._outcome(moment, reply)
-        except BoxClosing:
-            reason = "the call ended before confirm was sent"
-            outcome = STOPPED
-        except Exception as error:
-            reason = f"no answer from the service ({type(error).__name__})"
+            for attempt in range(1 + self._settings.change_retries):
+                try:
+                    reply = await self._box.change(f"{CONFIRM}:{moment.action}",
+                                                   self._tools.call(CONFIRM, {"token": moment.token, "ticket": moment.ticket}))
+                    outcome, reason = self._outcome(moment, reply)
+                except BoxClosing:
+                    outcome, reason = STOPPED, "the call ended before confirm was sent"
+                except Exception as error:
+                    outcome, reason = UNKNOWN_OUTCOME, f"no answer from the service ({type(error).__name__})"
+                if outcome != UNKNOWN_OUTCOME:
+                    break
+                self._diary.error(f"confirm try {attempt + 1} has no answer: {reason}")
         finally:
             if job is not None:
                 job.change_answered()
-        self._result(moment, outcome, reason)
+        if outcome != EXPIRED:
+            self._result(moment, outcome, reason)
+        return outcome
 
     def _outcome(self, moment: YesMoment, reply: Any) -> tuple[str, str]:
         if reply is UNKNOWN or not isinstance(reply, ToolReply):
@@ -262,8 +290,31 @@ class Guard:
             return STOPPED, "the caller said stop before it was saved"
         if reply.status == REFUSED:
             return REFUSED_OUTCOME, reply.message
-        return UNKNOWN_OUTCOME, reply.message  # an error, an expired token: never "done" when unsure
+        if reply.status == EXPIRED:
+            return EXPIRED, reply.message
+        return UNKNOWN_OUTCOME, reply.message  # an error: never "done" when unsure
 
+    async def _prepare_again(self, moment: YesMoment) -> None:
+        """Decision 19: the token expired before the yes was used: prepare the same change
+        again and ask again, a limited number of times."""
+        if moment.reprepared >= self._settings.expired_reprepares:
+            self._result(moment, UNKNOWN_OUTCOME, "the change expired again")
+            await self._give_up("the change kept expiring")
+            return
+        reply = await self._tools.call(PREPARE_PREFIX + moment.action, dict(moment.inputs))
+        token = reply.data.get("token") if reply.status == OK else None
+        if not token:
+            self._result(moment, REFUSED_OUTCOME, reply.message)
+            return
+        self.moment = YesMoment(str(token), moment.action, await self._door.question(str(token), self._language.value),
+                                inputs=moment.inputs, reprepared=moment.reprepared + 1)
+        await self._ask()
+
+    async def _give_up(self, why: str) -> None:
+        """Still stuck: the truth is already in a [result] note; then one hand-over."""
+        self._diary.decision("guard gives up", why=why)
+        if self._hand_over is not None:
+            await self._hand_over(why)
 
     async def _stopped(self, moment: YesMoment, label: str, words: str, why: str = "") -> None:
         self.moment = None

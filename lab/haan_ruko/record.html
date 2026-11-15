@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Haan vs ruko recording</title>
+<style>
+:root { color-scheme: light dark; }
+body { font: 16px/1.5 system-ui, sans-serif; max-width: 680px; margin: 24px auto; padding: 0 16px; }
+#line { font-size: 1.6em; line-height: 1.4; margin: 8px 0 20px; min-height: 3em; }
+#line-id, #progress { opacity: .75; }
+ol { padding-left: 20px; }
+button { font: inherit; padding: 8px 16px; margin: 0 6px 8px 0; }
+#message { color: #c0392b; min-height: 1.5em; }
+audio { display: block; width: 100%; margin: 8px 0; }
+label { display: block; margin: 12px 0; }
+</style>
+</head>
+<body>
+<h1>Haan vs ruko recording</h1>
+<p>Imagine the robot is talking to you on a phone call, and you say this while it talks.</p>
+<ol>
+  <li>Press <b>Record</b>, wait half a second, then say it the way you really would: a listening "haan" softly and quickly, an interruption the way you'd interrupt.</li>
+  <li>Press <b>Stop</b> when you're done, then <b>Save and next</b>.</li>
+</ol>
+<label>Speaker code (a short code like s1, never a real name):
+  <input id="speaker" value="s1" size="12" maxlength="12"></label>
+<p id="progress"></p>
+<p id="line-id"></p>
+<p id="line"></p>
+<button id="record" type="button">Record</button>
+<button id="stop" type="button" disabled>Stop</button>
+<button id="save" type="button" disabled>Save and next</button>
+<button id="back" type="button">Back</button>
+<button id="skip" type="button">Skip for now</button>
+<audio id="take" controls hidden></audio>
+<p id="message"></p>
+<script type="module" src="record.js"></script>
+</body>
+</html>

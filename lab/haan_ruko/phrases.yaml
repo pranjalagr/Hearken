@@ -1,0 +1,213 @@
+# What a caller says while the robot is talking (Part 4, the "haan vs ruko" model).
+#
+# The model learns one question: "is this a short listening sound?" If yes, the robot keeps
+# talking. Anything else is real speech, and the robot stops. Listening sounds are a small set,
+# so we try to list them all; real speech is endless, so we give the model a big, varied pile
+# of it instead of only "ruko" (the user, 10 Nov 2026). Widened the same day at the user's ask.
+#
+# held_back: never trained on, only tested, to see if the model handles what it never heard.
+# Made-up details only: no real names, numbers or addresses. Both "gaya" and "gayi" forms
+# are listed where a word changes with the speaker, because the voices are male and female.
+
+# ---- keep: "I'm listening, go on" -------------------------------------------------
+keep:
+  train:
+    - haan
+    - haan ji
+    - hmm
+    - hmm hmm
+    - hmmm
+    - mm-hmm
+    - uh-huh
+    - achha
+    - achha achha
+    - ji
+    - ji ji
+    - ji haan
+    - theek hai
+    - theek hai theek hai
+    - theek
+    - ok
+    - okay
+    - ok ok
+    - ok ji
+    - right
+    - right right
+    - sahi hai
+    - sahi
+    - haan haan
+    - haan haan haan
+    - haan bilkul
+    - bilkul
+    - bilkul bilkul
+    - "yes"  # quoted: unquoted, YAML reads it as true
+    - yes yes
+    - yeah
+    - yep
+    - sure
+    - haan theek hai
+    - achha theek hai
+    - haan sahi
+    - oh achha
+    - achha haan
+    - haan ji boliye
+    - haan boliye
+    - ji boliye
+    - hmm achha
+    - achha achha theek hai
+    - got it
+    - oh ok
+    - oh okay
+    - haan haan theek hai
+    - ji sir
+    - ji madam
+    - samajh gaya
+    - samajh gayi
+    - achha samjha
+    - theek hai bhaiya
+    - ji bhaiya
+    - ok bhaiya
+    - achha bhai
+    - haan yaar
+    - hmm theek hai
+    - perfect
+    - great
+  held_back:
+    - achha ji
+    - haan bolo
+    - yeah yeah
+    - ji bilkul
+    - okay okay
+    - haan bhaiya
+    - I see
+    - theek hai ji
+
+# ---- stop: short, clear interruptions -----------------------------------------------
+stop:
+  train:
+    - ruko
+    - ruko ruko
+    - ruko na
+    - ek minute
+    - ek second
+    - ek min
+    - nahi nahi
+    - nahi
+    - nahin
+    - wait
+    - wait wait
+    - wait a minute
+    - suniye
+    - suniye na
+    - suno
+    - suno suno
+    - sorry sorry
+    - sorry
+    - hello?
+    - hello hello
+    - hello, sun rahe ho?
+    - mat karo
+    - mat karna
+    - bas bas
+    - bas karo
+    - arre ruko
+    - arre nahi
+    - excuse me
+    - one second
+    - one minute
+    - stop
+    - stop stop
+    - bhaiya ek baat
+    - bhaiya suniye
+    - madam ek minute
+    - rukiye
+    - ruko zara
+    - nahi wo
+    - haan wait
+    - hang on
+    - no no
+    - galat hai
+    - ye galat hai
+    - nahi ye nahi
+    - sir ek minute
+    - pehle meri baat suniye
+    - cancel mat karo
+    - abhi mat karo
+    - kya?
+    - kya bola?
+    - dobara bolo
+    - awaaz nahi aa rahi
+    - arre bhai
+    - please ruko
+    - ek second ruko
+  held_back:
+    - ruk jaiye
+    - hold on
+    - arre bhaiya
+    - ek sec bhai
+    - zara rukiye
+    - no wait
+    - samajh nahi aaya
+    - phir se boliye
+
+# ---- mixed: starts like listening, then becomes speech ------------------------------
+# The first comma is where the answer changes: keep before it, stop after it. The voice
+# pauses there, and the voice detector finds that pause.
+mixed:
+  train:
+    - haan, lekin SMS aayega na?
+    - achha, ek baat batao
+    - haan, par refund kab aayega?
+    - ji, lekin address galat hai
+    - theek hai, but cancel mat karna
+    - hmm, ek minute ruko
+    - haan haan, lekin order number galat hai
+    - ok, par paise kab aayenge?
+    - achha, sorry, ek baat
+    - ji, wo naam galat bola aapne
+    - haan, actually kuch aur poochna hai
+    - theek hai, lekin kitni der lagegi?
+    - achha, nahi nahi, ruko
+    - haan, but mujhe UPI pe chahiye
+    - achha, toh delivery kab hogi?
+    - ji, par maine toh card se pay kiya tha
+    - theek hai, aur doosre order ka kya?
+    - haan, lekin pehle ye batao
+    - ok, but the address is wrong
+    - yes, but I want a refund
+    - achha, matlab ab cancel nahi hoga?
+    - hmm, lekin rider ne call nahi kiya
+    - haan ji, ek aur cheez
+    - theek hai theek hai, par jaldi karna
+    - ji, sorry, phir se boliye
+    - haan, nahi, ruko ek minute
+    - achha, toh paise kab tak aayenge?
+    - ok ok, lekin order cancel mat karna
+    - right, but what about my refund?
+    - achha, wait wait
+    - bilkul, lekin ek sawaal hai
+    - haan, kitne din lagenge?
+    - ji haan, lekin wo order alag hai
+    - okay, aur agar rider aa gaya toh?
+    - hmm hmm, par mujhe manager se baat karni hai
+  held_back:
+    - haan, wait
+    - ok, one question
+    - ji, lekin pehle confirm karo
+    - achha, phir kya hoga?
+    - theek hai, but jaldi please
+
+# ---- stop: ordinary caller sentences ----------------------------------------------
+# Taken by code from our existing test sentences, a fixed sample, so the model learns that
+# any real speech means stop, not one particular word.
+sentences:
+  from:
+    - lab/week1/number_transcripts.py   # the 831 order-number turns
+    - lab/eot_test/lines.yaml           # the 60 end-of-turn sentences, without the "..."
+  count: 250
+  held_back_share: 0.1
+
+# ---- keep: sounds that aren't speech ------------------------------------------------
+not_speech:
+  noise_files: [traffic, kitchen, crowd]  # already in lab/sounds/noise
+  still_needed: [cough, laugh, tv, breathing, sneeze]  # no files yet: free ones to be found, like the noise files

@@ -1,11 +1,21 @@
 aiosqlite==0.22.1
 google-genai==2.34.0
 httpx==0.28.1
+huggingface_hub==2.4.0
 mcp==2.3.0
 numpy==2.5.4
-pytest==9.2.0
+onnx==1.23.2
+onnxruntime==1.31.1
+pyarrow==26.0.1
 pytest-asyncio==1.4.1
+pytest==9.2.0
 pyyaml==6.0.3
+rapidfuzz==3.14.6
 scipy==1.18.1
 soundfile==0.14.0
+transformers==5.22.2
 websockets==17.4
+# The haan vs ruko model trains on the GPU (GTX 1650, driver 621.14, 15 Nov 2026). PyPI's Windows
+# torch is CPU-only, so install the GPU build from PyTorch's own index:
+#   pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cu126
+torch==2.14.1

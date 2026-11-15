@@ -1,0 +1,153 @@
+# The order-number test set (Part 2, decision 27): one caller turn per case, as the ears
+# wrote it, with the right answer.
+#   heard:  the ears' text of the turn
+#   span:   the words that are the order number ("" when there's none to take)
+#   expect: the 4 digits the robot should act on, or "ask" (it must ask again: unclear,
+#           unfinished, unsure) or "none" (no order number in this turn)
+# Made hard on purpose (the user, 7 Nov 2026): the point is to make the reader fail.
+# Real ears text first: what Sarvam and the other services really wrote (ears test,
+# 2 Nov 2026; this week's calls). Then hand-written hard cases. Code adds more
+# (lab/week1/number_cases.py).
+
+real:
+  # The ears test's number lines
+  - {heard: "Mera order number chaar paanch do ek hai", span: "chaar paanch do ek", expect: "4521"}
+  - {heard: "Mera order number chaar paanch do teen hai", span: "chaar paanch do teen", expect: "4523", note: "the ears misheard 4521; the read-back catches it"}
+  - {heard: "Order chaar paanch ek do cancel karna hai", span: "chaar paanch ek do", expect: "4512"}
+  - {heard: "Paintalis ikkis mera order hai", span: "Paintalis ikkis", expect: "4521"}
+  - {heard: "Paintalis pachchis mera order hai", span: "Paintalis pachchis", expect: "4525", note: "misheard"}
+  - {heard: "My order number is four five six one", span: "four five six one", expect: "4561"}
+  - {heard: "My order number is code five six one", span: "code five six one", expect: "ask"}
+  - {heard: "It's 45 30.", span: "45 30", expect: "4530"}
+  - {heard: "It's 45:30.", span: "45:30", expect: "4530"}
+  - {heard: "it's for five thirty", span: "for five thirty", expect: "ask"}
+  - {heard: "three five thirty", span: "three five thirty", expect: "3530", note: "misheard forty five thirty"}
+  - {heard: "Chaar paanch chaar saat", span: "Chaar paanch chaar saat", expect: "4547"}
+  - {heard: "tart punch four सात", span: "tart punch four सात", expect: "ask"}
+  - {heard: "Nahi nahi chaar paanch teen zero chaar paanch tees nahi", span: "chaar paanch teen zero", expect: "4530"}
+  - {heard: "Sana Khan order chaar paanch chaar saat", span: "chaar paanch chaar saat", expect: "4547"}
+  - {heard: "Sanatan order chaar paanch chaar saat", span: "chaar paanch chaar saat", expect: "4547"}
+  - {heard: "मेरा order number चार पांच दो एक है", span: "चार पांच दो एक", expect: "4521"}
+  - {heard: "order चार पांच एक दो cancel करना है", span: "चार पांच एक दो", expect: "4512"}
+  - {heard: "पैंतालीस इक्कीस मेरा order है", span: "पैंतालीस इक्कीस", expect: "ask", note: "Hindi-letter pairs aren't read: our ears write English letters"}
+  - {heard: "पैंतालीस fifty zero order है", span: "पैंतालीस fifty zero", expect: "ask"}
+  - {heard: "मेरा ऑर्डर नंबर 45237 है।", span: "45237", expect: "ask"}
+  - {heard: "मेरा ऑर्डर नंबर 4521 है।", span: "4521", expect: "4521"}
+  - {heard: "Order 4512 cancel karna hai.", span: "4512", expect: "4512"}
+  - {heard: "My order number is 4561. 4:30", span: "4561", expect: "4561"}
+  - {heard: "T530", span: "T530", expect: "ask"}
+  - {heard: "4 7", span: "4 7", expect: "ask"}
+  - {heard: "4 5 4 7", span: "4 5 4 7", expect: "4547"}
+  - {heard: "नहीं नहीं 4 5 3 0 4 5 30 नहीं", span: "4 5 3 0", expect: "4530"}
+  - {heard: "सनान खान ऑर्डर 4547", span: "4547", expect: "4547"}
+  - {heard: "किसका मेरा आर्डर है?", span: "", expect: "none"}
+  # This week's real ears text (robot lines heard by the caller, and the user's web calls)
+  - {heard: "Order chaar paanch teen shoonya cancel karke do sau chaalis rupaye aapke UPI par waapas kar doon haan ya nahin", span: "chaar paanch teen shoonya", expect: "4530"}
+  - {heard: "Order chaar paanch do ek cancel karke chaar sau pachaas rupaye aapke card par waapas kar doon haan ya nahin", span: "chaar paanch do ek", expect: "4521"}
+  - {heard: "Order chaar paanch ek do par chaalis rupaye aapke UPI par waapas bhej doon", span: "chaar paanch ek do", expect: "4512"}
+  - {heard: "Order chaar paanch chaar saat par do sau pachaas rupaye aapke UPI par waapas bhej doon kyonki item missing tha", span: "chaar paanch chaar saat", expect: "4547"}
+  - {heard: "Order chaar paanch teen teen cancel kar doon cash on delivery tha", span: "chaar paanch teen teen", expect: "4533"}
+  - {heard: "Order chaar paanch chhah ek ka address badalkar flat two C Rose Apartments Model Town Ludhiana kar doon haan ya nahin", span: "chaar paanch chhah ek", expect: "4561"}
+  - {heard: "Order chaar paanch teen shunya ka address badalkar House paintalis Sector pandrah Gurgaon kar doon haan ya nahin", span: "chaar paanch teen shunya", expect: "4530"}
+  - {heard: "Zaroor chaar paanch chhah ek ka naya address bataiye", span: "chaar paanch chhah ek", expect: "4561"}
+  - {heard: "Order chaar paanch teen", span: "chaar paanch teen", expect: "ask"}
+  - {heard: "Shunya", span: "Shunya", expect: "ask"}
+  - {heard: "Kya main sahi sun raha hoon? Chaar paanch do ek.", span: "Chaar paanch do ek", expect: "4521"}
+  - {heard: "Kya aap confirm kar rahe hain ki aapka order number chaar kaal do ek ka aur aapko cancel karna hai", span: "chaar kaal do ek", expect: "ask"}
+  - {heard: "Kya paintalis tees main sahi bol raha hoon", span: "paintalis tees", expect: "4530"}
+  - {heard: "Paintalis tees kya ye confirm wala hai?", span: "Paintalis tees", expect: "4530"}
+  - {heard: "Paintalis fees confirm hai ya nahi hai?", span: "Paintalis fees", expect: "ask"}
+  - {heard: "45 40 kya aap ye confirm kar rahe ho?", span: "45 40", expect: "4540"}
+  - {heard: "Yahan 45 30 confirm kar rahe hain.", span: "45 30", expect: "4530"}
+  - {heard: "Ya main sahi sun raha hun? 72 30", span: "72 30", expect: "7230"}
+  - {heard: "12", span: "12", expect: "ask"}
+  - {heard: "Shall I cancel order 4521 and send 450 rupees back to your card? Yes or no?", span: "4521", expect: "4521"}
+  - {heard: "Shall I change the address of order four five six one to flat two C Rose Apartments Model Town Ludhiana Yes or No", span: "four five six one", expect: "4561"}
+  - {heard: "Done. ₹450 will go back to your card.", span: "", expect: "none"}
+  - {heard: "Rs. 250 aapke UPI par aa jaayenge.", span: "", expect: "none"}
+
+hard:
+  # Corrections and two numbers: the last one the caller settles on counts
+  - {heard: "Chaar paanch do ek, nahi nahi, chaar paanch ek do", span: "chaar paanch ek do", expect: "4512"}
+  - {heard: "4521 nahi 4512 hai", span: "4512", expect: "4512"}
+  - {heard: "Pehle maine chaar paanch do ek bola tha galti se, sahi number chaar paanch ek do hai", span: "chaar paanch ek do", expect: "4512"}
+  - {heard: "chaar paanch ek do, sorry, chaar paanch do ek", span: "chaar paanch do ek", expect: "4521"}
+  - {heard: "Paintalis ikkis... nahi, paintalis barah", span: "paintalis barah", expect: "4512"}
+  - {heard: "chaar paanch teen... nahi nahi, chaar paanch teen shunya", span: "chaar paanch teen shunya", expect: "4530"}
+  - {heard: "Order chaar paanch do ek hai, nahi wait, woh purana tha", span: "", expect: "ask", note: "takes it back with no new number"}
+  - {heard: "Chaar paanch do ek ya chaar paanch ek do, yaad nahi", span: "", expect: "ask"}
+  - {heard: "Mere do order hain, chaar paanch paanch paanch aur chaar paanch do ek, chaar paanch do ek cancel karna hai", span: "chaar paanch do ek", expect: "4521"}
+  - {heard: "4555 deliver ho gaya, 4521 wala cancel karo", span: "4521", expect: "4521"}
+  # The amount, a time or an address right next to the number
+  - {heard: "Order 4521 ka refund 450 rupaye chahiye", span: "4521", expect: "4521"}
+  - {heard: "Chaar paanch do ek, chaar sau pachaas rupaye wapas karo", span: "Chaar paanch do ek", expect: "4521"}
+  - {heard: "4530 ka 240 rupaye", span: "4530", expect: "4530"}
+  - {heard: "Order chaar paanch chhah ek, address flat do C hai", span: "chaar paanch chhah ek", expect: "4561"}
+  - {heard: "Saat baje order kiya tha, number chaar paanch chaar saat", span: "chaar paanch chaar saat", expect: "4547"}
+  # Number words that aren't numbers, right after the number
+  - {heard: "Order chaar paanch do ek cancel kar do", span: "chaar paanch do ek", expect: "4521"}
+  - {heard: "Ek minute, haan, chaar paanch do ek", span: "chaar paanch do ek", expect: "4521"}
+  - {heard: "Chaar paanch ek do, ek kaam karo, cancel kar do", span: "chaar paanch ek do", expect: "4512"}
+  - {heard: "Paintalis tees ke saath ek aur order tha", span: "Paintalis tees", expect: "4530"}
+  - {heard: "Do minute pehle order kiya, chaar paanch teen shunya", span: "chaar paanch teen shunya", expect: "4530"}
+  # Fillers, restarts and pauses inside the number
+  - {heard: "Chaar paanch aa do ek", span: "Chaar paanch aa do ek", expect: "4521"}
+  - {heard: "Chaar paanch umm ek do", span: "Chaar paanch umm ek do", expect: "4512"}
+  - {heard: "Chaar paanch ahh ahh ek do haan chaar paanch ek do", span: "chaar paanch ek do", expect: "4512"}
+  - {heard: "Chaar paanch, haan, do ek", span: "Chaar paanch, haan, do ek", expect: "4521", note: "a 'haan' inside the number"}
+  - {heard: "Chaar... paanch... matlab... do ek", span: "", expect: "ask", note: "matlab is a correction word: unclear"}
+  - {heard: "Chaar paanch do do ek", span: "Chaar paanch do do ek", expect: "ask", note: "a noise word or a stammer: 5 digits"}
+  - {heard: "chaar chaar paanch do ek", span: "chaar chaar paanch do ek", expect: "ask"}
+  # Spellings and mishearings
+  - {heard: "Char panch do ek", span: "Char panch do ek", expect: "4521"}
+  - {heard: "Chr panch do ek", span: "Chr panch do ek", expect: "ask"}
+  - {heard: "Chaar so teen teen", span: "Chaar so teen teen", expect: "ask", note: "'so' could be sau (hundred) or a misheard do"}
+  - {heard: "Paintalis ekkis", span: "Paintalis ekkis", expect: "ask"}
+  - {heard: "Chaar paanch tin shoonya", span: "Chaar paanch tin shoonya", expect: "4530"}
+  - {heard: "Char panch chhe ek", span: "Char panch chhe ek", expect: "4561"}
+  - {heard: "chaar paanch saath", span: "chaar paanch saath", expect: "ask", note: "saath is 60 (or 'with'), giving 4560 or 457?: unsure"}
+  # Other ways to say a number
+  - {heard: "Chaar hazaar paanch sau ikkees", span: "Chaar hazaar paanch sau ikkees", expect: "4521"}
+  - {heard: "Four thousand five hundred twenty one", span: "Four thousand five hundred twenty one", expect: "ask", note: "English hundreds aren't read yet"}
+  - {heard: "Forty five twenty one", span: "Forty five twenty one", expect: "4521"}
+  - {heard: "Four five double two", span: "Four five double two", expect: "4522"}
+  - {heard: "Four triple five", span: "Four triple five", expect: "4555"}
+  - {heard: "Paintalis do ek", span: "Paintalis do ek", expect: "4521"}
+  - {heard: "4 paanch 2 ek", span: "4 paanch 2 ek", expect: "4521"}
+  - {heard: "45-21", span: "45-21", expect: "4521"}
+  - {heard: "four five two one five", span: "four five two one five", expect: "ask"}
+  # Unfinished and no number
+  - {heard: "Order number hai chaar paanch", span: "chaar paanch", expect: "ask"}
+  - {heard: "Ek second, dekh ke batata hoon", span: "", expect: "none"}
+  - {heard: "Haan ji, bataiye", span: "", expect: "none"}
+  - {heard: "Cancel kar do please", span: "", expect: "none"}
+  - {heard: "Do sau pachaas rupaye wapas chahiye", span: "", expect: "none"}
+  - {heard: "Mera number nau aath sab yaad nahi", span: "", expect: "ask"}
+
+calls:  # Real ears text from this week's calls (4-7 Nov 2026): the robot's lines as the caller's
+        # ears heard them (what was really said is in the puppet's script), and the user's
+        # own voice on the web-page calls (labelled by reading).
+  - {heard: "Order chaar paanch teen teen cancel kar doon cash on delivery tha toh koi refund nahi banega haan ya nahi", span: "chaar paanch teen teen", expect: "4533"}
+  - {heard: "Order chaar paanch chhah ek ka address badalkar flat to see", span: "chaar paanch chhah ek", expect: "4561", note: "'to see' was 'two C'"}
+  - {heard: "Order chaar paanch teen shunya ka address badalkar House saintalis Sector pandrah Gurgaon kar doon haan ya nahin", span: "chaar paanch teen shunya", expect: "4530"}
+  - {heard: "Shall I change the address of order 4561 to flat 2C Rose Apartments Model Town Ludhiana? Yes or no?", span: "4561", expect: "4561"}
+  - {heard: "Order chaar paanch teen shunya", span: "chaar paanch teen shunya", expect: "4530"}
+  - {heard: "Shoonya cancel karke do sau chaalis rupaye aapke UPI par waapas kar doon haan ya nahin", span: "Shoonya", expect: "ask", note: "the rest of the number came in the turn before"}
+  - {heard: "Shoonya ka address badalkar house chauhattar sector pandrah Gurgaon kar doon", span: "Shoonya", expect: "ask"}
+  - {heard: "Main theek kar deta hoon. Order chaar paanch teen", span: "chaar paanch teen", expect: "ask"}
+  - {heard: "Aapke do order hain chaar paanch paanch paanch deliver ho chuka hai aur chaar paanch do ek ban raha hai kaun sa cancel karoon", span: "", expect: "ask", note: "two orders, none chosen"}
+  - {heard: "Chattar", span: "Chattar", expect: "ask"}
+  - {heard: "Chahattar", span: "Chahattar", expect: "ask"}
+  - {heard: "74", span: "74", expect: "ask"}
+  - {heard: "Ho gaya, chaalis rupaye aapke UPI par vaapas aa jayenge.", span: "", expect: "none"}
+  - {heard: "Done. 450 rupees will go back to your card.", span: "", expect: "none"}
+  - {heard: "Do sau chaalis rupaye aapke UPI par vaapas aayenge", span: "", expect: "none"}
+  - {heard: "Do sau pachaas rupaye aapke UPI par aa jayenge.", span: "", expect: "none"}
+  - {heard: "Cancel karke do sau chaalis rupaye aapke UPI par waapas kar doon haan ya nahin", span: "", expect: "none"}
+  - {heard: "Kya cancel kar do?", span: "", expect: "none"}
+  - {heard: "Aapke do order hain", span: "", expect: "none"}
+  - {heard: "45 20 ya 45 30", span: "", expect: "ask", note: "the user's voice: unsure between two"}
+  - {heard: "Pahla wala ya doosra wala? Paisa bees ya paisa bees?", span: "", expect: "ask", note: "the user's voice: two numbers, both misheard"}
+  - {heard: "45 20", span: "45 20", expect: "4520", note: "the user's voice"}
+  - {heard: "47", span: "47", expect: "ask", note: "the user's voice"}
+  - {heard: "45 30 confirm", span: "45 30", expect: "4530", note: "the user's voice"}

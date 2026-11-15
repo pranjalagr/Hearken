@@ -1,0 +1,210 @@
+# Test cases for the number reader ALONE (agents/common/number_reader.py).
+# Each case is only what the AI hands over: the words of the order number, copied
+# exactly as the ears wrote them, mistakes and all. No full transcript: finding the
+# number in the sentence is the AI's job, not the reader's.
+#
+#   words:  what the AI gives the reader
+#   expect: the 4 digits the caller meant, or "ask" (the reader can't be sure and
+#           must ask again; a guess here could act on the wrong order)
+# Made to make the reader fail (the user, 7 Nov 2026). Order numbers are 4 digits.
+
+clean:
+  - {words: "chaar paanch do ek", expect: "4521"}
+  - {words: "char panch do ek", expect: "4521"}
+  - {words: "four five six one", expect: "4561"}
+  - {words: "paintaalees ikkees", expect: "4521"}
+  - {words: "paintalis ikkis", expect: "4521"}
+  - {words: "4521", expect: "4521"}
+  - {words: "45 21", expect: "4521"}
+  - {words: "4 5 2 1", expect: "4521"}
+  - {words: "चार पांच दो एक", expect: "4521"}
+  - {words: "४५२१", expect: "4521"}
+  - {words: "chaar hazaar paanch sau ikkees", expect: "4521"}
+  - {words: "forty five twenty one", expect: "4521"}
+  - {words: "chaar paanch teen shoonya", expect: "4530"}
+  - {words: "four five three zero", expect: "4530"}
+  - {words: "paintalis tees", expect: "4530"}
+  - {words: "chaalees shoonya nau", expect: "4009"}
+
+english misheard:  # English digits that the ears wrote as other words
+  - {words: "for five six one", expect: "4561"}
+  - {words: "fore five six one", expect: "4561"}
+  - {words: "four fave six one", expect: "4561"}
+  - {words: "four fiv six one", expect: "4561"}
+  - {words: "four five six on", expect: "4561"}
+  - {words: "four five six won", expect: "4561"}
+  - {words: "for fave six on", expect: "4561"}
+  - {words: "four five to one", expect: "4521"}
+  - {words: "four five too one", expect: "4521"}
+  - {words: "four five tu one", expect: "4521"}
+  - {words: "four five tree zero", expect: "4530"}
+  - {words: "four five free zero", expect: "4530"}
+  - {words: "four five sex one", expect: "4561"}
+  - {words: "four five siks one", expect: "4561"}
+  - {words: "four five seven ate", expect: "4578"}
+  - {words: "four five seven eit", expect: "4578"}
+  - {words: "four five nain one", expect: "4591"}
+  - {words: "four five three oh", expect: "4530"}
+  - {words: "four five three o", expect: "4530"}
+  - {words: "four five three ziro", expect: "4530"}
+  - {words: "four five three jero", expect: "4530"}
+  - {words: "for fife free on", expect: "4531"}
+  - {words: "fourty five thirty", expect: "4530"}
+  - {words: "fourty five twenty one", expect: "4521"}
+  - {words: "forty fife thirty", expect: "4530"}
+
+hindi misheard:  # Hindi digits as the ears really misspell them
+  - {words: "chaar paanch do ek", expect: "4521"}
+  - {words: "chhar paanch do ek", expect: "4521"}
+  - {words: "char panch doh ek", expect: "4521"}
+  - {words: "chaar paach do ek", expect: "4521"}
+  - {words: "chaar panj do ek", expect: "4521"}
+  - {words: "chaar paanch dho ek", expect: "4521"}
+  - {words: "chaar paanch do aek", expect: "4521"}
+  - {words: "chaar paanch do yek", expect: "4521"}
+  - {words: "chr panch do ek", expect: "4521"}
+  - {words: "chaar paanch theen shunya", expect: "4530"}
+  - {words: "chaar paanch tin sunya", expect: "4530"}
+  - {words: "chaar paanch teen shuniya", expect: "4530"}
+  - {words: "chaar paanch teen jiro", expect: "4530"}
+  - {words: "chaar paanch che ek", expect: "4561"}
+  - {words: "chaar paanch chhe ek", expect: "4561"}
+  - {words: "chaar paanch chhai ek", expect: "4561"}
+  - {words: "chaar paanch chah ek", expect: "4561"}
+  - {words: "chaar paanch sat ek", expect: "4571"}
+  - {words: "chaar paanch aat ek", expect: "4581"}
+  - {words: "chaar paanch aath ek", expect: "4581"}
+  - {words: "chaar paanch naw ek", expect: "4591"}
+  - {words: "chaar paanch nao ek", expect: "4591"}
+  - {words: "chaar paanch no ek", expect: "4591"}
+
+pairs misheard:  # Hindi pairs (45, 21, 30...) as the ears misspell them
+  - {words: "pentalis ikkis", expect: "4521"}
+  - {words: "paintalish ikkis", expect: "4521"}
+  - {words: "paintalis ekkis", expect: "4521"}
+  - {words: "paintalis ikis", expect: "4521"}
+  - {words: "paintalis tis", expect: "4530"}
+  - {words: "paintalis thees", expect: "4530"}
+  - {words: "paintalis fees", expect: "ask", note: "fees isn't 30 for sure"}
+  - {words: "chalis paanch", expect: "ask", note: "40 and 5: 405 or 45?"}
+  - {words: "paintalis bis", expect: "4520"}
+  - {words: "paintalis sath", expect: "4560"}
+  - {words: "paintalis satth", expect: "4560"}
+  - {words: "sainta lis ikkis", expect: "4721", note: "a word split in two by the ears"}
+  - {words: "paintalisikkis", expect: "4521", note: "two words run together"}
+
+mixed:  # styles and scripts mixed in one number
+  - {words: "4 paanch 2 ek", expect: "4521"}
+  - {words: "four paanch do one", expect: "4521"}
+  - {words: "paintalis do ek", expect: "4521"}
+  - {words: "45 do ek", expect: "4521"}
+  - {words: "chaar 5 21", expect: "4521"}
+  - {words: "चार paanch दो 1", expect: "4521"}
+  - {words: "forty five do ek", expect: "4521"}
+
+hindi and english mixed:  # both languages in one number, with the ears' misspellings
+  - {words: "char five do one", expect: "4521"}
+  - {words: "four paanch two ek", expect: "4521"}
+  - {words: "for paanch to ek", expect: "4521"}
+  - {words: "fore panch too won", expect: "4521"}
+  - {words: "chaar five teen zero", expect: "4530"}
+  - {words: "four panch theen ziro", expect: "4530"}
+  - {words: "chhar fave do on", expect: "4521"}
+  - {words: "chaar paanch three shunya", expect: "4530"}
+  - {words: "four five teen oh", expect: "4530"}
+  - {words: "chaar five six ek", expect: "4561"}
+  - {words: "four paanch che one", expect: "4561"}
+  - {words: "for panch sex ek", expect: "4561"}
+  - {words: "char fiv chhe won", expect: "4561"}
+  - {words: "four paanch sat aath", expect: "4578"}
+  - {words: "chaar five seven ate", expect: "4578"}
+  - {words: "four paanch nau one", expect: "4591"}
+  - {words: "chaar fave nain ek", expect: "4591"}
+  - {words: "paintalis twenty one", expect: "4521"}
+  - {words: "forty five ikkis", expect: "4521"}
+  - {words: "fourty five ikkees", expect: "4521"}
+  - {words: "paintalis thirty", expect: "4530"}
+  - {words: "forty five tees", expect: "4530"}
+  - {words: "pentalis twenty won", expect: "4521"}
+  - {words: "forty paanch do ek", expect: "4521", note: "forty and paanch: 45"}
+  - {words: "chalis five do ek", expect: "4521", note: "chalis and five: 45"}
+  - {words: "chaar paanch double do", expect: "4522"}
+  - {words: "four double paanch", expect: "ask", note: "4, 5, 5: only 3 digits"}
+  - {words: "chaar paanch triple one", expect: "ask", note: "45111: too long"}
+  - {words: "chaar hazaar five hundred ikkees", expect: "4521"}
+  - {words: "four hazaar paanch sau twenty one", expect: "4521"}
+  - {words: "four thousand paanch sau ikkis", expect: "4521"}
+  - {words: "4 paanch two ek", expect: "4521"}
+  - {words: "char 5 too won", expect: "4521"}
+  - {words: "पैंतालीस twenty one", expect: "4521"}
+  - {words: "चार five दो one", expect: "4521"}
+  - {words: "four पांच 2 ek", expect: "4521"}
+  - {words: "chaar paanch do one one", expect: "ask", note: "5 digits"}
+  - {words: "for paanch", expect: "ask"}
+
+punctuation and joins:  # how the ears punctuate and join digits
+  - {words: "45-21", expect: "4521"}
+  - {words: "45:21", expect: "4521"}
+  - {words: "4,521", expect: "4521"}
+  - {words: "4.5.2.1", expect: "4521"}
+  - {words: "four-five-two-one", expect: "4521"}
+  - {words: "Chaar, paanch, do, ek.", expect: "4521"}
+  - {words: "chaar... paanch... do... ek", expect: "4521"}
+  - {words: "fourfivetwoone", expect: "4521", note: "run together"}
+  - {words: "chaarpaanch doek", expect: "4521", note: "run together"}
+  - {words: "45 2 1", expect: "4521"}
+
+repeats:  # double and triple
+  - {words: "four five double two", expect: "4522"}
+  - {words: "four triple five", expect: "4555"}
+  - {words: "chaar paanch double two", expect: "4522"}
+  - {words: "chaar triple paanch", expect: "4555"}
+  - {words: "four five dabal two", expect: "4522"}
+  - {words: "four five double", expect: "ask", note: "double with nothing after it"}
+
+fillers and stammers inside:
+  - {words: "chaar paanch umm do ek", expect: "4521"}
+  - {words: "chaar aa paanch do ek", expect: "4521"}
+  - {words: "four uh five two one", expect: "4521"}
+  - {words: "chaar paanch, haan, do ek", expect: "4521"}
+  - {words: "chaar paanch ji do ek", expect: "4521"}
+  - {words: "chaar chaar paanch do ek", expect: "ask", note: "a stammer or a 5-digit number: can't tell"}
+  - {words: "chaar paanch do do ek", expect: "ask"}
+  - {words: "ch chaar paanch do ek", expect: "4521", note: "a cut-off start"}
+
+values:  # the number said as an amount
+  - {words: "chaar hazaar paanch sau ikkees", expect: "4521"}
+  - {words: "char hajar panch so ikkis", expect: "4521"}
+  - {words: "four thousand five hundred twenty one", expect: "4521"}
+  - {words: "four thousand five hundred and twenty one", expect: "4521"}
+  - {words: "paintalis sau ikkis", expect: "4521", note: "45 hundred 21, as people say years"}
+  - {words: "chaar hazaar ikkees", expect: "4021"}
+  - {words: "chaar hazaar paanch do", expect: "ask"}
+  - {words: "chaar sau teen teen", expect: "ask", note: "sau, or a misheard do?"}
+  - {words: "chaar so teen teen", expect: "ask"}
+
+wrong length:
+  - {words: "chaar paanch", expect: "ask"}
+  - {words: "chaar paanch do", expect: "ask"}
+  - {words: "paintalis", expect: "ask"}
+  - {words: "452", expect: "ask"}
+  - {words: "45213", expect: "ask"}
+  - {words: "chaar paanch do ek teen", expect: "ask"}
+  - {words: "four five six one four five six one", expect: "ask", note: "said twice"}
+  - {words: "chaar paanch do ek chaar paanch do ek", expect: "ask"}
+
+not a number:  # what the AI might wrongly hand over
+  - {words: "chaar kaal do ek", expect: "ask"}
+  - {words: "code five six one", expect: "ask"}
+  - {words: "tart punch four saat", expect: "ask"}
+  - {words: "T530", expect: "ask"}
+  - {words: "chaar paanch nahi do ek", expect: "ask"}
+  - {words: "order number", expect: "ask"}
+  - {words: "haan", expect: "ask"}
+  - {words: "chaar paanch saath", expect: "ask", note: "saath: 60, or with, or a misheard saat"}
+  - {words: "four five six won ton", expect: "ask"}
+  - {words: "four five seventh one", expect: "ask", note: "seventh is 7th, not 70"}
+  - {words: "chaar so teen ek", expect: "ask", note: "so is the English word, not sau"}
+  - {words: "chaar paanch at ek", expect: "ask", note: "at is the English word, not aath"}
+  - {words: "पैंतालीस इक्कीस", expect: "4521", note: "Hindi-letter pairs"}
+  - {words: "पैंतालीस 21", expect: "4521"}

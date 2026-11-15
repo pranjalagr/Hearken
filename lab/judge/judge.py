@@ -266,6 +266,38 @@ def groq_judge(client: Any, model: str = GROQ_MODEL, effort: str = GROQ_EFFORT,
     return ask
 
 
+def sarvam_judge(client: Any, model: str, on_retry: Callable[[BaseException, float], None] | None = None,
+                 on_usage: Callable[[dict[str, Any]], None] | None = None,
+                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+                 form: dict[str, Any] = FORM) -> Ask:
+    """The same careful asking as groq_judge, on Sarvam. Thinking is off with a null
+    reasoning_effort: Sarvam's docs list "none", but its API refused that (8 Nov 2026)."""
+    from lab.week1.flash_lite_check import with_retries
+
+    answer_form = {"type": "json_schema", "json_schema": {"name": "judge_marks", "strict": True, "schema": strict_form(form)}}
+
+    async def ask(rules: str, text: str) -> dict[str, Any]:
+        body = {"model": model, "reasoning_effort": None, "response_format": answer_form,
+                "messages": [{"role": "system", "content": rules}, {"role": "user", "content": text}]}
+
+        async def post() -> dict[str, Any]:
+            response = await client.post("/chat/completions", json=body)
+            if response.is_error:
+                raise httpx.HTTPStatusError(f"Sarvam said {response.status_code}: {response.text[:300]}",
+                                            request=response.request, response=response)
+            return response.json()
+
+        reply = await with_retries(post, sleep=sleep, on_retry=on_retry)
+        if on_usage:
+            on_usage(reply.get("usage", {}))
+        try:
+            return json.loads(reply["choices"][0]["message"]["content"] or "")
+        except (KeyError, IndexError, ValueError) as exc:
+            raise BadAnswer(f"not a JSON answer: {exc}") from exc
+
+    return ask
+
+
 def _broken_answer(response: httpx.Response) -> bool:
     """Groq's 400 for an answer the model got wrong, not for a wrong request."""
     if response.status_code != 400:

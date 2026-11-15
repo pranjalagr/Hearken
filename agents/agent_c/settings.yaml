@@ -1,0 +1,29 @@
+# Agent C: Talker + Thinker + Guard around the same ears, voice and tools as Agent A
+# (docs/agent_c_design.md). Every number is a starting guess from the plan's Part 2
+# decisions, named beside it; tune from real calls, never in code.
+
+# The same first line as every robot in the lab (Agent A's), so no robot gets a
+# better opening, and no brain request is spent on a greeting.
+greeting: "Namaste, Hearken Food se bol raha hoon. Bataiye?"
+
+talker:
+  # Decision 2 (changed 15 Nov 2026): free Flash-Lite allows 500 requests a day.
+  model: gemini-3.5-flash-lite
+  # Decision 18: temperature 1.0, thinking minimal (what the week-1 Talker checks used).
+  temperature: 1.0
+
+thinker:
+  # The user's choice on 15 Nov 2026: Flash-Lite too (free tier, 500 requests a day).
+  model: gemini-3.5-flash-lite
+
+ears:  # decision 24 (2 Nov 2026), the same as Agent A's: best on key details
+  model: saaras:v3-realtime
+  language: hi-IN
+  mode: translit
+  stream_type: fast
+  silence_ms: 250
+
+voice:  # decision 12, the same as Agent A's
+  model: bulbul:v4-flash
+  speaker: sunny_enhi_customer
+  language: hi-IN

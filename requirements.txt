@@ -1,11 +1,13 @@
 aiosqlite==0.22.1
-google-genai==2.34.0
+google-genai==3.3.0
 httpx==0.28.1
 huggingface_hub==2.4.0
 mcp==2.3.0
 numpy==2.5.4
 onnx==1.23.2
 onnxruntime==1.31.1
+# Agent A (and later C) are built on Pipecat; its Google part needs google-genai 3.x (15 Nov 2026).
+pipecat-ai[google,sarvam,silero,mcp]==1.16.0
 pyarrow==26.0.1
 pytest-asyncio==1.4.1
 pytest==9.2.0

@@ -18,12 +18,19 @@ from typing import Any, Protocol
 
 from engine.service.backend import Backend
 from engine.service.replies import ERROR, ToolReply
+from engine.service.tool_catalog import ToolSpec
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Tools(Protocol):
     async def call(self, tool: str, inputs: dict[str, Any]) -> ToolReply: ...
+
+    async def catalog(self) -> list[ToolSpec]:
+        """The tools this call's mode shows the AI (decision 5), as the backend lists them.
+        Agents with an AI brain (A, B) take their tool list from here, so they can never
+        hold a tool the mode doesn't offer."""
+        ...
 
 
 class BackendTools:
@@ -34,6 +41,9 @@ class BackendTools:
 
     async def call(self, tool: str, inputs: dict[str, Any]) -> ToolReply:
         return await self._backend.call_tool(tool, inputs)
+
+    async def catalog(self) -> list[ToolSpec]:
+        return list(self._backend.tools)
 
 
 class McpTools:
@@ -50,6 +60,10 @@ class McpTools:
             # Not our server's reply shape: say so, never guess a status.
             return ToolReply(ERROR, f"unreadable tool reply for {tool}")
         return ToolReply(body.get("status", ERROR), body.get("message", ""), body.get("data") or {})
+
+    async def catalog(self) -> list[ToolSpec]:
+        listed = await self._session.list_tools()
+        return [ToolSpec(tool.name, tool.description or "", dict(tool.input_schema)) for tool in listed.tools]
 
 
 @contextlib.asynccontextmanager

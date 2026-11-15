@@ -157,6 +157,11 @@ def _clean_value(name: str, spec: Input, value: Any) -> tuple[Any, str | None]:
         # Accept 4521.0 as 4521: some models send whole numbers as decimals.
         if is_number and float(value).is_integer():
             return int(value), None
+        # Accept "4521" as 4521: Flash-Lite often sends a whole number as text despite the
+        # schema, and a strict refusal sank Agent A's first lookup in most calls (15 Nov
+        # 2026, the user's choice). Only plain digits: "45x1" or "4521.5" stay refused.
+        if isinstance(value, str) and value.strip().isascii() and value.strip().isdigit():
+            return int(value.strip()), None
         return None, f"{name} must be a whole number."
     if spec.type == NUMBER:
         if is_number:

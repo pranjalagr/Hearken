@@ -284,3 +284,45 @@ def test_the_steady_clock_is_shared_by_separate_programs():
                                 capture_output=True, text=True, check=True).stdout)
     after = time.perf_counter_ns()
     assert before < theirs < after
+
+
+def test_a_robot_stopped_by_a_service_limit_is_a_lab_problem_not_the_robots(tmp_path):
+    # Decision 32; 15 Nov 2026: Gemini's per-minute limit and Sarvam's credit ran out mid-run.
+    import json
+
+    from lab.runner.run_call import robot_hit_a_limit
+
+    diary = tmp_path / "robot.jsonl"
+    assert robot_hit_a_limit(diary) is None  # no diary: nothing to say
+    diary.write_text(json.dumps({"kind": "said", "text": "Order 429 mil gaya"}) + "\n"
+                     + json.dumps({"kind": "error", "text": "the voice failed: bad text"}) + "\n"
+                     + json.dumps({"kind": "error", "text": "order 4295 not found"}) + "\n", encoding="utf-8")
+    # A number in speech, an order number like 4295 in an error, or another error: not a limit.
+    assert robot_hit_a_limit(diary) is None
+    with diary.open("a", encoding="utf-8") as out:
+        out.write(json.dumps({"kind": "error", "text": "Unknown error occurred: 429 Too Many Requests"}) + "\n")
+    assert "429" in robot_hit_a_limit(diary)
+
+
+def test_the_lab_command_loads_and_knows_agent_a():
+    # No other test imports cli.lab_run, so a broken line in it went unseen once (15 Nov 2026).
+    import cli.lab_run as lab_run
+
+    assert {"puppet:perfect", "agent:a", "agent:a-background"} <= set(lab_run.ROBOTS)
+    assert lab_run.ROBOTS["agent:a"].ticket_check is False
+
+
+def test_a_refused_key_stops_the_batch_before_any_call_and_counts_as_the_labs_problem(tmp_path):
+    # 15 Nov 2026: a key without Gemini's free tier, and a Sarvam key with no credit,
+    # ran 9 calls the lab called "fine" while the robot had no brain.
+    import json
+
+    from lab.runner.key_check import refused_keys
+    from lab.runner.run_call import robot_hit_a_limit
+
+    assert refused_keys("m", checks=(lambda: None, lambda: None)) == []
+    assert refused_keys("m", checks=(lambda: "GEMINI_API_KEY_2: 403", lambda: None)) == ["GEMINI_API_KEY_2: 403"]
+    diary = tmp_path / "robot.jsonl"
+    diary.write_text(json.dumps({"kind": "error", "text": "Unknown error occurred: 403 Forbidden. free tier is not available"}) + "\n",
+                     encoding="utf-8")
+    assert "403" in robot_hit_a_limit(diary)

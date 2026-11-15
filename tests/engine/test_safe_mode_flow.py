@@ -188,6 +188,18 @@ async def test_bad_inputs_are_refused_before_any_rule(open_call):
     assert (await kit.tool("prepare_move_money", **MOVE, extra=1)).message == "Unknown input: extra."
     reply = await kit.tool("prepare_move_money", from_box="a", to_box="b", amount_paise="lots")
     assert reply.message == "amount_paise must be a whole number."
+    for not_whole in ("45x1", "4521.5", "-5", "४५"):  # only plain digits count as a whole number
+        reply = await kit.tool("prepare_move_money", from_box="a", to_box="b", amount_paise=not_whole)
+        assert reply.message == "amount_paise must be a whole number.", not_whole
+
+
+async def test_a_whole_number_sent_as_text_is_read_as_that_number(open_call):
+    # 15 Nov 2026: Flash-Lite often sends "4521" despite the schema; it means 4521.
+    kit = await open_call(ToyPack())
+    as_text = await kit.tool("prepare_move_money", from_box="a", to_box="b", amount_paise=" 500 ")
+    as_number = await kit.tool("prepare_move_money", from_box="a", to_box="b", amount_paise=500)
+    assert as_text.status == as_number.status != "refused" and "whole number" not in as_text.message
+    assert as_text.message.replace("T-1", "T-2") == as_number.message or as_text.message == as_number.message
 
 
 class BrokenMove(MoveMoney):

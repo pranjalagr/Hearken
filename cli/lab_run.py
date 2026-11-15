@@ -25,9 +25,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from common.env import load_env, require
+from common.env import groq_key, load_env, require
+from common.freeze_watch import FreezeWatch, Stall
 from common.groq import groq_client
 from common.retry import http_status
+from engine.storage.call_settings import PLAIN, SAFE
 from engine.tasks.task_file import load_task, load_tasks
 from lab.caller.parts import RealCaller, missing_keys
 from lab.caller.report_card import AI_FORM, report_on_run
@@ -37,7 +39,7 @@ from lab.judge.judge import Ask, groq_judge, paced
 from lab.puppets.food import PUPPETS, Careless, script_for
 from lab.results.table import compare, results_markdown, summarize
 from lab.runner.batch import make_run_dir, plan_calls, run_batch, write_run_json
-from lab.runner.run_call import PuppetRobot
+from lab.runner.run_call import AgentRobot, PuppetRobot
 from lab.scorer.score import score_call
 from lab.settings import load_settings
 from packs.food.pack import FoodPack
@@ -49,7 +51,40 @@ PRACTICE = ROOT / "packs" / "food" / "tasks" / "practice"
 # matter. Each Groq model has its own daily tokens: the caller's model ran out on
 # 4 Nov 2026, and this one takes nothing from it.
 REPORT_MODEL = "openai/gpt-oss-120b"
-ROBOTS = {"puppet:perfect": PuppetRobot("perfect"), "puppet:careless": PuppetRobot("careless")}
+AGENTS = Path(__file__).resolve().parents[1] / "agents"
+
+
+def _agent_a(name: str, mode: str, background: bool = False) -> AgentRobot:
+    import yaml
+
+    # Read straight from its settings file, so run.json keeps the models without
+    # importing Pipecat into every lab command.
+    data = yaml.safe_load((AGENTS / "agent_a" / "settings.yaml").read_text(encoding="utf-8"))
+    models = {"brain": data["brain"]["model"], "ears": data["ears"]["model"],
+              "voice": f"{data['voice']['model']}/{data['voice']['speaker']}", "background_tools": str(background)}
+    return AgentRobot(name, "cli.agent_a", mode, ticket_check=False,
+                      extra_args=("--background-tools",) if background else (), models=models)
+
+
+ROBOTS = {
+    "puppet:perfect": PuppetRobot("perfect"),
+    "puppet:careless": PuppetRobot("careless"),
+    # Decision 3: in the results table A runs in safe mode with the ticket check off.
+    "agent:a": _agent_a("agent:a", SAFE),
+    # Part 7's extra run: Pipecat's one-line background-tool switch, in plain mode.
+    "agent:a-background": _agent_a("agent:a-background", PLAIN, background=True),
+}
+
+
+def write_stalls(path: Path, stalls: list[Stall]) -> None:
+    """The lab's own stalls over 100 ms: "ours" names the code that ran; "the OS" means
+    the loop was only waiting, so the laptop was busy or paging memory."""
+    lines = ["# Event-loop stalls over 100 ms (decision 14)", "", f"{len(stalls)} stalls.", ""]
+    for stall in stalls:
+        cause = "ours" if stall.ours else "the OS (busy or paging laptop)"
+        lines.append(f"- {stall.wall} (+{stall.at_s:.1f} s): {stall.late_ms:.0f} ms late, cause: {cause}")
+        lines += [f"  {frame}" for frame in stall.where]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 async def run(args: argparse.Namespace) -> Path:
@@ -57,6 +92,12 @@ async def run(args: argparse.Namespace) -> Path:
     if args.at_once:
         settings = settings.with_changes(calls_at_once=args.at_once)
     robots = [ROBOTS[name] for name in args.robots.split(",")]
+    agents = [robot for robot in robots if isinstance(robot, AgentRobot)]
+    if agents and args.caller != "chain":
+        # An AI robot hears real speech only: the scripted caller just beeps.
+        raise SystemExit("AI robots need the real caller: add --caller chain")
+    if agents and not args.at_once:
+        settings = settings.with_changes(calls_at_once=settings.ai_calls_at_once)
     tasks = load_tasks(PRACTICE)
     if args.tasks:
         wanted = args.tasks.split(",")
@@ -72,23 +113,49 @@ async def run(args: argparse.Namespace) -> Path:
         missing = missing_keys(caller_settings)
         if missing:
             raise SystemExit(f"missing in pakka/.env: {', '.join(missing)}")
-        robots = [replace(robot, voice="sarvam") for robot in robots]
+        if agents:
+            from lab.runner.key_check import refused_keys
+
+            # One tiny request per key before any call: a refused or full key must not cost
+            # a whole batch (15 Nov 2026). The caller's brain is checked too.
+            groq_brain = caller_settings.brain_model if caller_settings.brain_company == "groq" else None
+            refused = refused_keys(agents[0].models.get("brain", ""), caller_model=groq_brain)
+            if refused:
+                raise SystemExit("a service refused a key, so no calls were started:\n  " + "\n  ".join(refused))
+        robots = [replace(robot, voice="sarvam") if isinstance(robot, PuppetRobot) else robot for robot in robots]
         caller_info = {"caller": "chain", "caller_settings": caller_settings.as_dict()}
 
     def mode_for(task, robot):
+        if isinstance(robot, AgentRobot):
+            return robot.mode
         return script_for(task.id, robot.variant)[1]
 
-    plans = [p for p in plan_calls(tasks, robots, args.repeats, mode_for)
-             if p.robot.variant == "perfect" or isinstance(PUPPETS[p.task.id].careless, Careless)]
+    def wanted(plan) -> bool:
+        if isinstance(plan.robot, AgentRobot):
+            # Some races exist only in safe mode (a task's `modes`), so a plain-mode run skips them.
+            return plan.robot.mode in plan.task.modes
+        return plan.robot.variant == "perfect" or isinstance(PUPPETS[plan.task.id].careless, Careless)
+
+    plans = [replace(p, ticket_check=p.robot.ticket_check) if isinstance(p.robot, AgentRobot) else p
+             for p in plan_calls(tasks, robots, args.repeats, mode_for) if wanted(p)]
     if args.caller == "chain":
-        maker = RealCaller(caller_settings, use_noise=False)  # every robot here is a puppet
+        # Puppets get a clean line; AI robots face each task's background noise (C5).
+        maker = RealCaller(caller_settings, use_noise=bool(agents))
         await maker.warm_up()
         plans = [replace(plan, caller=maker) for plan in plans]
     run_dir = make_run_dir(RUNS, args.label)
     write_run_json(run_dir, plans, robots, settings, {"kind": "run", "repeats": args.repeats, **caller_info})
     print(f"{len(plans)} calls, {settings.calls_at_once} at once -> {run_dir}")
     try:
-        batch = await run_batch(plans, FoodPack(), run_dir, settings)
+        # Every stall of this program's event loop, with its cause, goes into the run's
+        # folder: on 15 Nov 2026 long calls kept "falling behind" and only a guess was left.
+        watch = FreezeWatch()
+        watch.start()
+        try:
+            batch = await run_batch(plans, FoodPack(), run_dir, settings)
+        finally:
+            await watch.stop()
+            write_stalls(run_dir / "stalls.md", watch.stalls)
     finally:
         if args.caller == "chain":
             await maker.close()
@@ -141,7 +208,7 @@ def _groq_judge(timeout_s: float, on_retry, on_usage) -> Judge:
     from common.groq import groq_client
     from lab.judge.judge import GROQ_MODEL, groq_judge
 
-    client = groq_client(require("GROQ_API_KEY"), timeout_s)
+    client = groq_client(groq_key(), timeout_s)
     return Judge(groq_judge(client, on_retry=on_retry, on_usage=on_usage), GROQ_MODEL, client.aclose)
 
 
@@ -209,7 +276,7 @@ async def caller_report(run_dir: Path, with_ai: bool):
     if not with_ai:
         return await report_on_run(run_dir, caller_settings, settings.sound_level)
     load_env()
-    client = groq_client(require("GROQ_API_KEY"), settings.judge_timeout_s)
+    client = groq_client(groq_key(), settings.judge_timeout_s)
     try:
         ask = paced(groq_judge(client, REPORT_MODEL, "low", form=AI_FORM), settings.judge_gap_s)
         return await report_on_run(run_dir, caller_settings, settings.sound_level, ask)

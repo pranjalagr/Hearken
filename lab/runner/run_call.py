@@ -88,6 +88,30 @@ class CallerMaker(Protocol):
 
 
 @dataclass(frozen=True)
+class AgentRobot:
+    """An AI robot (Agents A, B, C), started exactly like the puppets (L3): its own
+    program, given only its database copy and a phone port."""
+
+    name: str  # e.g. "agent:a-safe"; the results table groups calls by it
+    module: str  # the program, e.g. "cli.agent_a"
+    mode: str  # plain or safe (decision 3)
+    ticket_check: bool
+    extra_args: tuple[str, ...] = ()
+    models: dict[str, str] = field(default_factory=dict)  # kept in run.json
+
+    def command(self, db: Path, folder: Path, bells_url: str, settings: LabSettings, task: Task) -> list[str]:
+        return [
+            sys.executable, "-m", self.module,
+            "--db", str(db), "--port", "0", "--bells", bells_url, "--diary", str(folder / "robot.jsonl"),
+            "--backend-events", str(folder / "backend.jsonl"),
+            "--no-audio-s", str(settings.robot_no_audio_s), "--max-call-s", str(settings.robot_max_call_s),
+            "--change-wait-s", str(settings.robot_change_wait_s),
+            # Every AI robot gets the same cap, so no robot is cut off sooner than another.
+            "--max-brain-requests", str(settings.robot_max_brain_requests), *self.extra_args,
+        ]
+
+
+@dataclass(frozen=True)
 class CallPlan:
     call_id: str
     task: Task
@@ -97,6 +121,9 @@ class CallPlan:
     attempt: int = 1
     # Who makes the caller; None is the scripted caller, for puppet lab runs.
     caller: CallerMaker | None = None
+    # None: on in safe mode, as for the puppets. Agents A and B run in safe mode
+    # with the ticket check off (decision 3), so a robot can say so.
+    ticket_check: bool | None = None
 
 
 @dataclass
@@ -126,7 +153,8 @@ async def run_call(plan: CallPlan, pack: Pack, run_dir: Path, board: BellBoard, 
     outcome = CallOutcome(plan.call_id, plan.task.id, plan.robot.name, plan.mode, plan.seed, plan.attempt,
                           label=FINE, why="", folder=str(folder))
     factory = factory or CallFactory(pack, run_dir / "copies")
-    db = await start_call(factory, pack, plan.task, plan.call_id, plan.mode, plan.mode == SAFE, NormalDelays())
+    ticket_check = plan.mode == SAFE if plan.ticket_check is None else plan.ticket_check
+    db = await start_call(factory, pack, plan.task, plan.call_id, plan.mode, ticket_check, NormalDelays())
     await asyncio.to_thread(_backup, db, folder / "start.db")
     stderr = (folder / "robot.stderr.txt").open("wb")
     robot = await RobotProcess.start(plan.robot.command(db, folder, bells_url, settings, plan.task), stderr)
@@ -145,6 +173,11 @@ async def run_call(plan: CallPlan, pack: Pack, run_dir: Path, board: BellBoard, 
         # 20 ms pieces for the other calls (on 1 Nov 2026, doing it here froze
         # every live call by up to 0.4 s).
         await asyncio.to_thread(recorder.save, folder, _about(plan, about_caller))
+        if outcome.label == FINE:
+            limit = robot_hit_a_limit(folder / "robot.jsonl")
+            if limit:
+                # Decision 32: a speed or credit limit is the lab's problem, rerun, never the robot's.
+                _label(outcome, LAB_PROBLEM, f"a service limit or refused key stopped the robot: {limit}")
         if outcome.label == FINE:
             _judge_break(outcome, code, settings)
         (folder / "outcome.json").write_text(json.dumps(asdict(outcome), indent=1, default=str), encoding="utf-8")
@@ -224,6 +257,32 @@ def _label_never_ended(outcome: CallOutcome, late_ms: float, settings: LabSettin
         _label(outcome, LAB_PROBLEM, f"the lab fell behind by {late_ms:.0f} ms")
     else:
         _label(outcome, ROBOT_FAILURE, "the call never ended")
+
+
+# How a service says "too many requests" or "out of credit" in a robot's diary errors:
+# Gemini's "429 Too Many Requests" / RESOURCE_EXHAUSTED and Sarvam's quota_exceeded (both
+# seen 15 Nov 2026). Whole phrases, not a bare "429": order numbers like 4295 show up
+# in error texts too, and turned a normal puppet call into a "lab problem".
+LIMIT_SIGNS = ("Too Many Requests", "RESOURCE_EXHAUSTED", "quota_exceeded", "rate limit", "rate_limit",
+               # A key the service refuses is the lab's setup, never the robot: on 15 Nov 2026 a
+               # key whose project lost Gemini's free tier ("403 Forbidden ... free tier is not
+               # available") left a robot with no brain for 9 calls the lab called "fine".
+               "403 Forbidden", "PERMISSION_DENIED", "API key not valid", "free tier is not available")
+
+
+def robot_hit_a_limit(diary: Path) -> str | None:
+    """The first diary error that is a service's limit, if any."""
+    if not diary.exists():
+        return None
+    for line in diary.read_text(encoding="utf-8").splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        text = str(record.get("text", ""))
+        if record.get("kind") == "error" and any(sign in text for sign in LIMIT_SIGNS):
+            return text[:160]
+    return None
 
 
 def _judge_break(outcome: CallOutcome, robot_code: int | None, settings: LabSettings) -> None:

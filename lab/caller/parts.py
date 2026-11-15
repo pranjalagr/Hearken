@@ -12,7 +12,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from common.env import load_env, require
+from common.env import groq_key, groq_key_name, load_env, require, sarvam_key, sarvam_key_name
 from common.groq import groq_client
 from lab.caller.brain.brain import Brain, gemini_ask, groq_ask
 from lab.caller.chain import ChainCaller, ChainParts
@@ -33,7 +33,7 @@ def _brain_client(settings: CallerSettings) -> Any:
     """One client for the whole batch. Making one takes up to 0.4 s of blocked event
     loop (measured 4 Nov 2026), which every live call would feel."""
     if settings.brain_company == "groq":
-        return groq_client(require("GROQ_API_KEY"), settings.brain_timeout_s, verify=shared_tls())
+        return groq_client(groq_key(), settings.brain_timeout_s, verify=shared_tls())
     if settings.brain_company == "gemini":
         from common.google import google_client
 
@@ -46,7 +46,7 @@ def _ears(settings: CallerSettings) -> Any:
     if settings.ears_company == "deepgram":
         return Deepgram(require("DEEPGRAM_API_KEY"))
     if settings.ears_company == "sarvam":
-        return Sarvam(require("SARVAM_API_KEY"), **SARVAM_FAST)
+        return Sarvam(sarvam_key(), **SARVAM_FAST)
     raise ValueError(f"unknown ears company {settings.ears_company!r}")
 
 
@@ -114,7 +114,7 @@ class RealCaller:
 def missing_keys(settings: CallerSettings) -> list[str]:
     """Names of the keys a real run needs but .env doesn't have. Keys are never printed."""
     load_env()
-    needed = {"SMALLEST_API_KEY", "SARVAM_API_KEY",
-              {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY"}[settings.brain_company],
-              {"deepgram": "DEEPGRAM_API_KEY", "sarvam": "SARVAM_API_KEY"}[settings.ears_company]}
+    needed = {"SMALLEST_API_KEY", sarvam_key_name(),
+              {"groq": groq_key_name(), "gemini": "GEMINI_API_KEY"}[settings.brain_company],
+              {"deepgram": "DEEPGRAM_API_KEY", "sarvam": sarvam_key_name()}[settings.ears_company]}
     return sorted(name for name in needed if not os.environ.get(name, "").strip())

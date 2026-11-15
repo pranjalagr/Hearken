@@ -7,6 +7,13 @@
 # the busy-lab check stays green.
 calls_at_once: 5
 
+# Decision 32: runs with an AI robot (A, B, C). The free Gemini tier allows 15
+# requests a minute per model, and a call sends several within seconds (look up,
+# prepare, confirm, reply): 5 at once hit that limit in 34 places on 15 Nov 2026.
+# One at a time stays under it with no waiting, so no robot's reply delay is
+# stretched by the lab.
+ai_calls_at_once: 1
+
 # L3: how long a robot program may take to say "ready" before it counts as
 # never answering (a robot failure, L4).
 robot_ready_timeout_s: 30.0
@@ -15,6 +22,12 @@ robot_ready_timeout_s: 30.0
 robot_no_audio_s: 30.0
 robot_max_call_s: 900.0
 robot_change_wait_s: 10.0
+# The most brain requests an AI robot may send in one call; at this many it hangs
+# up, and the task counts as failed. On 15 Nov 2026 one Agent A call (food_09)
+# went round in circles on background noise for 56 requests, a ninth of a free
+# Gemini key's day. Clean calls took 6-17; the messiest finished ones 22-26.
+# Puppets have no brain, so only AI robots are given it.
+robot_max_brain_requests: 40
 
 # L4: at most this many reruns of a call for lab problems; more stops the batch.
 max_reruns: 2

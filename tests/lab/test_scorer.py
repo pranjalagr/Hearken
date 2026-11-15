@@ -192,6 +192,8 @@ def test_a_row_the_task_says_must_not_exist_is_a_wrong_change():
     ("30 minute mein aa jayega", set(), {30}),
     ("Theek hai, kar do. Ek second.", set(), set()),  # "do" and "ek" are words here, not numbers
     ('"Flat 2C, Rose Apartments" kar doon?', set(), {2}),
+    ("Apna 4-digit order number batayein", set(), set()),  # the number's shape, not a fact (15 Nov 2026)
+    ("Your four digit order number, please", set(), set()),
 ])
 def test_numbers_are_read_in_every_form_people_say_them(text, money, plain):
     found = read_numbers(text)

@@ -34,3 +34,43 @@ def require(name: str) -> str:
     if not value:
         raise RuntimeError(f"{name} is not set: put a line {name}=... in pakka/.env")
     return value
+
+
+# Which .env line holds the Sarvam key for this run. The user keeps several and
+# picks one per run (15 Nov 2026); robots and the pretend caller all read the
+# same one, and nothing ever switches keys on its own.
+SARVAM_KEY_CHOICE = "HEARKEN_SARVAM_KEY"
+
+
+def sarvam_key_name() -> str:
+    return os.environ.get(SARVAM_KEY_CHOICE, "").strip() or "SARVAM_API_KEY"
+
+
+def sarvam_key() -> str:
+    return require(sarvam_key_name())
+
+
+# The same for the robots' Gemini key: the user picks which .env line a run uses
+# (15 Nov 2026), and nothing switches keys on its own.
+GEMINI_KEY_CHOICE = "HEARKEN_GEMINI_KEY"
+
+
+def gemini_key_name() -> str:
+    return os.environ.get(GEMINI_KEY_CHOICE, "").strip() or "GEMINI_API_KEY"
+
+
+def gemini_key() -> str:
+    return require(gemini_key_name())
+
+
+# The same for the Groq key (the pretend caller's brain and the judge): picked per run
+# by the user (15 Nov 2026), never switched by code.
+GROQ_KEY_CHOICE = "HEARKEN_GROQ_KEY"
+
+
+def groq_key_name() -> str:
+    return os.environ.get(GROQ_KEY_CHOICE, "").strip() or "GROQ_API_KEY"
+
+
+def groq_key() -> str:
+    return require(groq_key_name())

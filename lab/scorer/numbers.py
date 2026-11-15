@@ -23,7 +23,10 @@ from lab.caller.mouth.number_words import HINDI_0_TO_99
 from lab.scorer.call_record import CallRecord
 
 # Not facts: "ek" here means "a moment", not the number one.
-SET_PHRASES = ("ek second", "ek minute", "ek baar", "ek pal", "one moment", "one second", "one minute")
+SET_PHRASES = ("ek second", "ek minute", "ek baar", "ek pal", "one moment", "one second", "one minute",
+               # Asking for an order number's shape states no fact about any order. On
+               # 15 Nov 2026 "apna 4-digit order number batayein" alone failed 7 Agent A calls.
+               "4-digit", "4 digit", "four-digit", "four digit")
 
 _HINDI = {word: n for n, word in enumerate(HINDI_0_TO_99)}
 _HINDI_SCALES = {"sau": 100, "hazaar": 1_000, "hazar": 1_000, "lakh": 100_000, "crore": 10_000_000}

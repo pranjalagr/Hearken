@@ -18,10 +18,12 @@ SETTINGS_FILE = Path(__file__).with_name("settings.yaml")
 @dataclass(frozen=True)
 class LabSettings:
     calls_at_once: int
+    ai_calls_at_once: int
     robot_ready_timeout_s: float
     robot_no_audio_s: float
     robot_max_call_s: float
     robot_change_wait_s: float
+    robot_max_brain_requests: int
     max_reruns: int
     lab_problem_share_flag: float
     freeze_limit_ms: float

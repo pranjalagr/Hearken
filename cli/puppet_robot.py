@@ -22,7 +22,7 @@ from pathlib import Path
 from agents.common.call_box import CallBoxSettings
 from agents.common.diary import NO_DIARY, Diary
 from agents.common.tools import mcp_tools
-from common.env import load_env, require
+from common.env import load_env, require, sarvam_key
 from common.stopwatch import JsonlSink
 from common.wire.robot_line import RobotLine, bound_port, serve_robot
 from engine.lab_controls.clock import WallClock
@@ -43,7 +43,7 @@ async def main(args: argparse.Namespace) -> str:
         # Real speech, for a caller with real ears (Part 3, C14). Made before "ready":
         # the puppet has to say each line the moment its turn comes.
         load_env()
-        voice = SavedRobotVoice(require("SARVAM_API_KEY"))
+        voice = SavedRobotVoice(sarvam_key())
         await asyncio.to_thread(voice.make, lines_of(steps))
         extras = {"voice": voice}
     async with mcp_tools(db_path, args.bells, Path(args.backend_events) if args.backend_events else None) as tools:

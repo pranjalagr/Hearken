@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EOT clip review</title>
+<style>
+  :root { --ink: #1c1c1c; --soft: #666; --line: #ddd; --bg: #fafafa; --ok: #1a7f4b; --no: #b3261e; }
+  body { font: 17px/1.5 system-ui, sans-serif; color: var(--ink); background: var(--bg); max-width: 640px; margin: 32px auto; padding: 0 16px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .soft { color: var(--soft); font-size: 15px; }
+  #sentence { font-size: 20px; margin: 24px 0 4px; }
+  #sentence b { background: #ffe9a8; font-weight: 600; }
+  audio { width: 100%; margin: 12px 0; }
+  .buttons { display: flex; gap: 12px; }
+  button { flex: 1; font: inherit; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer; }
+  #ok { color: var(--ok); border-color: var(--ok); }
+  #reject { color: var(--no); border-color: var(--no); }
+  nav { display: flex; justify-content: space-between; margin-top: 16px; }
+  nav button { flex: 0 0 auto; padding: 6px 14px; font-size: 15px; }
+  #error { color: var(--no); }
+</style>
+<h1>Does this caller sound like they paused, with more to say?</h1>
+<p class="soft">The clip stops where the caller paused. The yellow part is what you should hear. Keys: <b>A</b> approve, <b>R</b> reject, <b>Space</b> play again.</p>
+<p id="progress" class="soft"></p>
+<div id="sentence"></div>
+<p id="details" class="soft"></p>
+<audio id="player" controls autoplay></audio>
+<div class="buttons">
+  <button id="ok">Approve: sounds unfinished (A)</button>
+  <button id="reject">Reject: sounds finished or broken (R)</button>
+</div>
+<nav><button id="back">Back</button><button id="skip">Next</button></nav>
+<p id="error"></p>
+<script>
+  // Starts at the first clip with no verdict, so listening can stop and carry on.
+  let clips = [], at = 0;
+  const $ = (id) => document.getElementById(id);
+  const escapeText = (t) => t.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+  function show() {
+    const done = clips.filter((c) => c.verdict).length;
+    const rejected = clips.filter((c) => c.verdict === "reject").length;
+    $("progress").textContent = `${done} of ${clips.length} done, ${rejected} rejected. Clip ${at + 1}.`;
+    const clip = clips[at];
+    if (!clip) { $("sentence").textContent = "All done. You can close this page."; return; }
+    const [before, after] = clip.text.split("...");
+    $("sentence").innerHTML = `<b>${escapeText(before)}...</b> ${escapeText(after)}`;
+    const sound = clip.noise ? `${clip.noise}, ${clip.level}` : "no background";
+    $("details").textContent = `${clip.voice}, ${sound}` + (clip.verdict ? `. Your verdict: ${clip.verdict}` : "");
+    $("player").src = `/audio/${clip.id}_unfinished.wav`;
+  }
+
+  async function give(verdict) {
+    const clip = clips[at];
+    if (!clip) return;
+    const reply = await fetch(`/verdict?clip=${clip.id}&verdict=${verdict}`, { method: "POST" });
+    if (!reply.ok) { $("error").textContent = (await reply.json()).error; return; }
+    $("error").textContent = "";
+    clip.verdict = verdict;
+    at += 1;
+    show();
+  }
+
+  $("ok").onclick = () => give("ok");
+  $("reject").onclick = () => give("reject");
+  $("back").onclick = () => { at = Math.max(0, at - 1); show(); };
+  $("skip").onclick = () => { at = Math.min(clips.length, at + 1); show(); };
+  document.onkeydown = (event) => {
+    if (event.key === "a" || event.key === "A") give("ok");
+    if (event.key === "r" || event.key === "R") give("reject");
+    if (event.key === " ") { event.preventDefault(); $("player").currentTime = 0; $("player").play(); }
+  };
+
+  fetch("/clips").then((r) => r.json()).then((list) => {
+    clips = list;
+    const first = clips.findIndex((c) => !c.verdict);
+    at = first === -1 ? clips.length : first;
+    show();
+  });
+</script>
+</html>

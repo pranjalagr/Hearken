@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+from collections.abc import Callable
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -65,12 +66,13 @@ def check_recording(data: bytes) -> None:
         raise BadRecording("it was too quiet: speak closer, or raise the microphone level in Windows sound settings")
 
 
-def save_recording(speaker: str, line_id: str, data: bytes, lines: list[EarsLine], sounds: Path = SOUNDS) -> Path:
+def save_recording(speaker: str, line_id: str, data: bytes, lines: list[EarsLine], sounds: Path = SOUNDS,
+                   check: Callable[[bytes], None] = check_recording) -> Path:
     if not _SPEAKER.fullmatch(speaker):
         raise BadRecording("the speaker must be a short code like s1: small letters and digits only")
     if line_id not in {line.id for line in lines}:
         raise BadRecording(f"unknown line {line_id!r}")
-    check_recording(data)
+    check(data)
     target = raw_path(speaker, line_id, sounds)
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_suffix(".tmp")
@@ -84,8 +86,9 @@ class _RecordHandler(SimpleHTTPRequestHandler):
     extensions_map = {**SimpleHTTPRequestHandler.extensions_map, ".js": "text/javascript",
                       ".html": "text/html; charset=utf-8"}
 
-    def __init__(self, *args, lines: list[EarsLine], sounds: Path, **kwargs) -> None:
-        self.lines, self.sounds = lines, sounds
+    def __init__(self, *args, lines: list[EarsLine], sounds: Path, index: Path | None = None,
+                 check: Callable[[bytes], None] = check_recording, **kwargs) -> None:
+        self.lines, self.sounds, self.index, self.check = lines, sounds, index, check
         super().__init__(*args, directory=str(PAGE_DIR), **kwargs)
 
     def end_headers(self) -> None:
@@ -111,6 +114,14 @@ class _RecordHandler(SimpleHTTPRequestHandler):
             self._json(200, [{"id": line.id, "say": line.say,
                               "done": known and raw_path(speaker, line.id, self.sounds).exists()} for line in self.lines])
             return
+        if self.index is not None and url.path in ("/", "/index.html"):
+            page = self.index.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
+            return
         super().do_GET()
 
     def do_POST(self) -> None:
@@ -133,12 +144,15 @@ class _RecordHandler(SimpleHTTPRequestHandler):
         else:
             query = parse_qs(url.query)
             try:
-                save_recording(query.get("speaker", [""])[0], query.get("line", [""])[0], body, self.lines, self.sounds)
+                save_recording(query.get("speaker", [""])[0], query.get("line", [""])[0], body, self.lines, self.sounds, self.check)
                 self._json(200, {"saved": True})
             except BadRecording as error:
                 self._json(400, {"error": str(error)})
 
 
-def make_server(port: int = 8090, sounds: Path = SOUNDS, lines: list[EarsLine] | None = None) -> ThreadingHTTPServer:
-    handler = partial(_RecordHandler, lines=lines if lines is not None else load_lines(), sounds=sounds)
+def make_server(port: int = 8090, sounds: Path = SOUNDS, lines: list[EarsLine] | None = None, index: Path | None = None,
+                check: Callable[[bytes], None] = check_recording) -> ThreadingHTTPServer:
+    """`index` and `check` let another test reuse this page's recording code with its own
+    instructions and its own rule for a good take (the end-of-turn test, 9 Nov 2026)."""
+    handler = partial(_RecordHandler, lines=lines if lines is not None else load_lines(), sounds=sounds, index=index, check=check)
     return ThreadingHTTPServer(("127.0.0.1", port), handler)

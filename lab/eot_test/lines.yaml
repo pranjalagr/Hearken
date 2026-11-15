@@ -1,0 +1,76 @@
+# The end-of-turn test sentences (Part 2, decision 25): what a pretend caller says.
+#
+# Each has exactly one "...", where the caller pauses. No commas, because the voice pauses
+# at commas too, and the clip is cut at the longest pause: one pause keeps the cut at the
+# "...". Verbs avoid "raha/rahi", because each line is said by male and female voices.
+# Made-up orders, names and addresses only.
+
+# ---- numbers, the way people pause inside them --------------------------------------
+- Mera order number chaar paanch... do ek hai.
+- Order number hai saat teen... nau do.
+- Chaar paanch ek... do wala order hai.
+- Paintalis... ikkis mera order hai.
+- Order chhattees... baarah cancel karna hai.
+- My order number is four five... six one.
+- It is forty five... thirty I think.
+- Mera number aath do... saat shoonya hai.
+- Order ek nau... teen chhah ka status batao.
+- Number hai nau nau... ek paanch.
+- Woh order tha chhah teen... do aath.
+- Uhh order number uhh... teen saat paanch ek.
+- Order ka number hai do shoonya... chaar chaar.
+- The number is seven two... eight four.
+- Ek minute order number hai... chaar teen saat do.
+
+# ---- a sentence left hanging on a joining word ---------------------------------------
+- Mujhe refund chahiye kyunki... khana thanda aaya tha.
+- Order cancel karna hai lekin... paise wapas milenge na?
+- Address galat ho gaya aur... phone bhi band tha.
+- Khana toh aa gaya par... raita nahi mila.
+- Rider ne call kiya tha aur... phir kuch nahi bola.
+- I want to cancel it because... it is very late.
+- Refund mil jayega agar... abhi cancel karun?
+- Paise kat gaye lekin... order nahi dikh raha.
+- Order toh kiya tha par... confirm nahi hua.
+- Mera address hai ki... Sector pandrah Model Town.
+- Time bahut ho gaya isliye... ab cancel kar do.
+- The food came but... one item was missing.
+
+# ---- thinking before the point --------------------------------------------------------
+- Bhaiya woh... mera khana abhi tak nahi aaya.
+- Matlab woh... pizza wala order cancel karna hai.
+- Haan toh... mujhe address badalna hai.
+- Actually... I need to change my address.
+- Woh kya hai na... order galat aa gaya.
+- Suniye... refund ka status batana.
+- Mera naam... Neha Singh hai.
+- Naam hai... Rahul Verma.
+- Yeh order... kab tak aayega?
+- Achha toh... kitna paisa wapas milega?
+- So basically... the order never arrived.
+- Hello... koi sun raha hai?
+
+# ---- details: addresses, items, money --------------------------------------------------
+- Naya address hai Flat do C... Rose Apartments Model Town.
+- House saintalis... Sector pandrah mein bhejna hai.
+- Deliver karna hai Gali number teen... Lajpat Nagar.
+- Paneer roll aur... do masala dosa mangwaye the.
+- Chaalis rupaye ka... raita nahi mila.
+- Dhai sau rupaye... card pe wapas chahiye.
+- UPI pe... paise bhej do.
+- Deliver hona tha saat baje... ab nau baj gaye.
+- Please send it to Flat two C... Rose Apartments.
+- Cancel kar do aur... paise card pe bhejna.
+- Momos ka... refund chahiye mujhe.
+
+# ---- asking for something -------------------------------------------------------------
+- Mujhe ek baar... manager se baat karni hai.
+- Aap mera order... abhi cancel kar do.
+- Kitni der aur... lagegi bhai?
+- Delivery boy ka... number de do.
+- Can you please... tell me the refund status?
+- Mera paisa... kab tak aayega?
+- Order cancel hoga ya... nahi hoga?
+- Aaj subah wala... order dekhna hai.
+- I just want to... talk to a real person.
+- Yeh doosri baar... galat order aaya hai.

@@ -64,6 +64,12 @@ class JobDesk:
         else:
             self._notebook.ring()  # a note held while the caller spoke may go now
 
+    def robot_stopped(self) -> None:
+        """The stop-or-keep model stopped the voice (decision 16): what was being said
+        is now old, so notes wait for the Thinker's "still good" or its redone work."""
+        if self.job is not None and self.job.live:
+            self.job.bump()
+
     def reply_spoken(self, up_to_note: int) -> None:
         """The voice played the Talker's reply to the notes up to this one, to the end."""
         if self._waiting_reply is None or self._waiting_reply[1] > up_to_note:

@@ -61,3 +61,11 @@ guard:  # decisions 20-23
   vad_start_s: 0.2
   # Decision 21: a no or a stop needs only one voice; these on the partial words are one.
   stop_words: {ruko: stop, mat: stop, wait: stop, stop: stop, nahi: "no"}
+
+stop_check:  # decision 26: the haan-ruko model (Part 4, v4) while the robot talks
+  # The trained model, outside git (cli/haan_ruko.py train writes it here). Without the
+  # file, Agent C falls back to Pipecat's own stop-on-any-sound, as Agent A has.
+  model_path: runs/week1/haan_ruko/haan_ruko.onnx
+  line: 0.30  # Part 4's chosen line for v4
+  window_s: 2.0  # the model hears the last 2 s (lab/haan_ruko/sound.py WINDOW_S)
+  every_s: 0.1  # one check every 0.1 s while the robot talks

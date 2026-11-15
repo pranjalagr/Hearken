@@ -26,6 +26,8 @@ from pipecat.services.sarvam.stt import SarvamRealtimeSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.transcriptions.language import Language
+from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy, VADUserTurnStartStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 from agents.agent_c.desk import JobDesk
 from agents.agent_c.guard.guard import Door, Guard, GuardSettings
@@ -34,6 +36,8 @@ from agents.agent_c.guard.partial_words import PartialWords
 from agents.agent_c.job import Job, Turns
 from agents.agent_c.notebook import Note, Notebook
 from agents.agent_c.settings import AgentCSettings
+from agents.agent_c.stop_check import OnnxStopModel, StopListener, StopModel
+from agents.agent_c.stop_switch import StopSwitch
 from agents.agent_c.talker.ask_thinker import ASK_THINKER_SCHEMA, AskThinker
 from agents.agent_c.talker.feed import NoteFeed
 from agents.agent_c.talker.language import EarsLanguage, StickyLanguage
@@ -58,6 +62,7 @@ from engine.service.tool_catalog import CONFIRM, ToolSpec
 BrainMaker = Callable[[Sequence[ToolSpec]], ThinkerBrain]
 WORDS = Path(__file__).resolve().parent / "talker" / "words.yaml"
 JUDGE_PROMPT = Path(__file__).resolve().parent / "guard" / "prompts" / "judge.md"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
@@ -99,7 +104,8 @@ class AgentC:
     def __init__(self, settings: AgentCSettings, keys: Keys, tools: Tools, *,
                  box_settings: CallBoxSettings = CallBoxSettings(), diary: Diary = NO_DIARY,
                  max_brain_requests: int = 40, brain_maker: BrainMaker | None = None,
-                 words: SpokenWords | None = None, door: Door | None = None, judge: YesJudge | None = None) -> None:
+                 words: SpokenWords | None = None, door: Door | None = None, judge: YesJudge | None = None,
+                 stop_model: StopModel | None = None) -> None:
         self._settings = settings
         self._keys = keys
         self._tools = tools
@@ -112,12 +118,13 @@ class AgentC:
         self._door = door
         self._judge = judge
         self._guard_settings = GuardSettings.from_settings(settings.section("guard"))
+        self._stop_model = stop_model if stop_model is not None else load_stop_model(settings, diary)
         self._limits = ThinkerLimits.from_settings(settings.section("thinker_limits"))
         self._heard_pieces = 0
         self.result: CallResult | None = None
 
     async def __call__(self, line: RobotLine) -> None:
-        call = CallParts(self._settings, self._diary, self._words)
+        call = CallParts(self._settings, self._diary, self._words, self._stop_model)
         box = CallBox(self._box_settings, on_crash=call.desk.on_crash)
         try:
             self.result = await box.run(lambda b: self._main(line, b, call))
@@ -141,7 +148,7 @@ class AgentC:
                             params=PipelineParams(audio_in_sample_rate=SAMPLE_RATE, audio_out_sample_rate=SAMPLE_RATE,
                                                   enable_metrics=True, enable_usage_metrics=True),
                             observers=[DiaryObserver(self._diary), cap, EarsLanguage(call.language),
-                                       SpeechWatch(call.feed_replied, call.speech_ended), PartialWords(call.partial_words)])
+                                       call.speech, PartialWords(call.partial_words)])
 
         async def tell_talker(text: str) -> None:
             self._diary.decision("notes to talker", text=text)
@@ -204,7 +211,14 @@ class AgentC:
                                  settings=SarvamTTSService.Settings(model=s.voice["model"], voice=s.voice["speaker"],
                                                                     language=Language(s.voice["language"])))
         context = LLMContext(tools=talker_tools())
-        turns = LLMContextAggregatorPair(context, user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()))
+        user_params = LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer())
+        if call.stop_listener is not None:
+            # Decision 26: the caller's sound never stops the voice by itself; only the
+            # stop-or-keep model does, through the stop switch.
+            user_params = LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer(), user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy(enable_interruptions=False),
+                       TranscriptionUserTurnStartStrategy(enable_interruptions=False)]))
+        turns = LLMContextAggregatorPair(context, user_params=user_params)
 
         @turns.user().event_handler("on_user_turn_started")
         async def began(aggregator, strategy) -> None:
@@ -215,7 +229,8 @@ class AgentC:
             call.caller_finished(message.content or "")
 
         mouth = Mouth(call.speaker, context, self._diary)
-        return Pipeline([transport.input(), ears, turns.user(), talker, mouth, voice, transport.output(), turns.assistant()])
+        return Pipeline([transport.input(), call.switch, ears, turns.user(), talker, mouth, voice, transport.output(),
+                         turns.assistant()])
 
     async def _listen(self, line: RobotLine, transport: LineTransport, box: CallBox, call: CallParts) -> None:
         async for event in line.events():
@@ -224,6 +239,7 @@ class AgentC:
                 self._heard_pieces += 1
                 call.caller_ms = event.caller_ms
                 await transport.input().feed(event.piece)
+                await call.heard_piece(event.piece)
             elif isinstance(event, (Played, Cleared, Key)):
                 call.receipt(event)
             elif isinstance(event, End):
@@ -237,7 +253,8 @@ class AgentC:
 class CallParts:
     """One call's own pieces: its notebook, turns, job desk and note feed."""
 
-    def __init__(self, settings: AgentCSettings, diary: Diary, pack_words: SpokenWords) -> None:
+    def __init__(self, settings: AgentCSettings, diary: Diary, pack_words: SpokenWords,
+                 stop_model: StopModel | None = None) -> None:
         self.notebook = Notebook(int(settings.section("notebook")["max_notes"]))
         self.turns = Turns()
         self.desk = JobDesk(self.notebook, self.turns, self._no_thinker, diary)
@@ -249,6 +266,14 @@ class CallParts:
         self.view = NoteView(self.words)
         self.speaker = Speaker(self.words, self.view, self.language, int(settings.talker["max_sentences"]))
         self.guard: Guard | None = None  # set once the call has begun, when the robot holds a door
+        self._diary = diary
+        self.switch = StopSwitch(name="stop-switch")
+        self.speech = SpeechWatch(self.feed_replied, self.speech_ended)
+        self.stop_listener: StopListener | None = None
+        if stop_model is not None:
+            stop = settings.section("stop_check")
+            self.stop_listener = StopListener(stop_model, float(stop["line"]), float(stop["window_s"]), float(stop["every_s"]),
+                                              self.stop_talking, lambda ms: diary.error(f"stop check took {ms:.0f} ms"))
         self.caller_ms = 0  # the newest caller piece heard, on the caller's clock (the wire's caller_ms)
 
     @staticmethod
@@ -260,7 +285,22 @@ class CallParts:
         if self.guard is not None:
             self.guard.turn_began(self.caller_ms)
 
+    async def heard_piece(self, piece: bytes) -> None:
+        if self.stop_listener is not None:
+            await self.stop_listener.heard(piece, self.speech.speaking)
+
+    async def stop_talking(self, chance: float) -> None:
+        """The stop-or-keep model said stop: stop the voice, make what was being said
+        about old news (a new version), and stop any ticket being confirmed."""
+        self._diary.decision("stop talking", chance=round(chance, 3))
+        await self.switch.stop_voice()
+        self.desk.robot_stopped()
+        if self.guard is not None:
+            self.guard.stop_ticket("the stop-or-keep model said stop")
+
     def caller_finished(self, words: str) -> None:
+        if self.stop_listener is not None:
+            self.stop_listener.turn_finished()
         self.language.turn_finished(words)
         self.speaker.heard(words)
         self.desk.caller_finished(words)
@@ -304,3 +344,13 @@ class CallParts:
         if self.guard is not None:
             self.guard.speech_ended(cut, spoken)
 
+
+def load_stop_model(settings: AgentCSettings, diary: Diary) -> StopModel | None:
+    """The trained model, if its file is here. It lives outside git, so a fresh copy of
+    the project has none: then the robot stops on any caller sound, as Agent A does,
+    and says so in its diary."""
+    path = PROJECT_ROOT / settings.section("stop_check")["model_path"]
+    if not path.exists():
+        diary.error(f"no stop-or-keep model at {path}: stopping on any caller sound instead")
+        return None
+    return OnnxStopModel(path)

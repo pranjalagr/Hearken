@@ -256,3 +256,28 @@ async def test_a_question_the_voice_speaks_in_two_pieces_is_still_marked_once_it
     rig.guard.played(rig.marks[-1], 5000)
     await rig.caller_says("haan cancel kar dijiye", started_ms=5100)
     assert await rig.order_status() == "cancelled"
+
+
+async def test_the_judge_asks_several_keys_at_once_and_takes_the_first_answer():
+    # The owner's choice, 16 Nov 2026: Flash-Lite took 1-9 s per request in a slow spell.
+    from agents.agent_c.guard.judge import first_answer
+
+    delays = iter([5.0, 0.01, 5.0])  # one of three answers quickly
+    started, finished = [], []
+
+    async def ask(question, words):
+        delay = next(delays)
+        started.append(delay)
+        await asyncio.sleep(delay)
+        finished.append(delay)
+        return "yes"
+
+    assert await asyncio.wait_for(first_answer(ask, 3)("q", "haan"), 1) == "yes"
+    await asyncio.sleep(0.05)
+    assert sorted(started) == [0.01, 5.0, 5.0] and finished == [0.01]  # the slow two were cancelled
+
+    async def broken(question, words):
+        raise RuntimeError("429")
+
+    with pytest.raises(RuntimeError):
+        await first_answer(broken, 2)("q", "haan")  # every racer failed: unclear, never yes

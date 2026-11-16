@@ -32,7 +32,7 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 from agents.agent_c.desk import JobDesk
 from agents.agent_c.guard.guard import DONE, Door, Guard, GuardSettings
-from agents.agent_c.guard.judge import TimedJudge, YesJudge, gemini_ask
+from agents.agent_c.guard.judge import TimedJudge, YesJudge, first_answer, gemini_ask
 from agents.agent_c.guard.partial_words import PartialWords
 from agents.agent_c.hand_over import HANDED_OVER, HandOver
 from agents.agent_c.job import Job, Turns
@@ -213,10 +213,13 @@ class AgentC:
         if self._judge is not None:
             return self._judge
         section = self._settings.section("guard")
-        # Gemini's own minimum deadline; the judge's ~1 s limit is held by TimedJudge.
+        # Gemini's own minimum deadline; the judge's own limit is held by TimedJudge.
         client = self._ring(max(float(section["judge_s"]), GOOGLE_MIN_TIMEOUT_S))
-        ask = gemini_ask(client, section["judge_model"], JUDGE_PROMPT.read_text(encoding="utf-8"))
-        return TimedJudge(ask, float(section["judge_s"]), lambda: cap.add(1), self._diary.error)
+        racers = int(section["judge_racers"])
+        # The same question on several keys at once, first answer wins: each racer takes
+        # the ring's next client, so each goes out on its own key.
+        ask = first_answer(gemini_ask(client, section["judge_model"], JUDGE_PROMPT.read_text(encoding="utf-8")), racers)
+        return TimedJudge(ask, float(section["judge_s"]), lambda: cap.add(racers), self._diary.error)
 
     def _ring(self, timeout_s: float) -> ClientRing:
         """One client per back-office key, taking turns request by request."""

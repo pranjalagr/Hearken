@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
@@ -55,6 +56,33 @@ class TimedJudge:
         except Exception as error:
             self._on_error(f"judge failed, so unclear: {error!r}")
             return UNCLEAR
+
+
+def first_answer(ask: Callable[[str, str], Awaitable[str]], racers: int) -> Callable[[str, str], Awaitable[str]]:
+    """The same question sent `racers` times at once; the first answer wins, the rest are
+    cancelled. The owner's choice (16 Nov 2026): Flash-Lite took 1-9 s per request in its
+    slow spells, on every key alike, and the 2 s judge timed out three times in a call. When
+    one request is stuck another often is not. With a ClientRing under `ask`, each racer goes
+    out on its own key. If every racer fails, the last error is raised (the judge then says
+    "unclear", never yes)."""
+    if racers < 1:
+        raise ValueError("at least one racer")
+
+    async def ask_first(question: str, words: str) -> str:
+        tasks = [asyncio.ensure_future(ask(question, words)) for _ in range(racers)]
+        error: BaseException | None = None
+        try:
+            for finished in asyncio.as_completed(tasks):
+                try:
+                    return await finished
+                except Exception as exc:  # this racer failed: wait for the next one
+                    error = exc
+            raise error if error is not None else RuntimeError("no judge answer")
+        finally:
+            for task in tasks:
+                task.cancel()  # the losers: their answers are not needed
+
+    return ask_first
 
 
 def gemini_ask(client: Any, model: str, system: str) -> Callable[[str, str], Awaitable[str]]:

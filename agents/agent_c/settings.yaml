@@ -56,10 +56,14 @@ hand_over_tool: hand_over_to_human
 
 guard:  # decisions 20-23
   judge_model: gemini-3.5-flash-lite  # the one-word judge (decision 21)
-  # decision 30 said ~1 s, then "unclear", never a yes. On 16 Nov 2026 the first real yes
-  # ("Haan sahi hai", food_01) timed out at 1 s: Flash-Lite's measured median whole reply
-  # is 0.82 s (decision 2), so 1 s cut off about half. 2 s, awaiting the owner's OK.
-  judge_s: 2.0
+  # decision 30 said ~1 s, then "unclear", never a yes. 16 Nov 2026: the first real yes
+  # timed out at 1 s, then three in one call at 2 s, in a Flash-Lite slow spell (1-9 s per
+  # request on every key). The owner chose (same day) 5 s plus asking several keys at once.
+  # A timeout is still "unclear", never a yes.
+  judge_s: 5.0
+  # How many keys get the same judge question at once; the first answer wins (the owner's
+  # choice, 16 Nov 2026). Each counts against the brain cap. 3 of the 3 back-office keys.
+  judge_racers: 3
   # After an answer that needs asking again, the Talker replies first; then the Guard asks.
   # A starting guess: about one short Talker line.
   reask_wait_s: 1.5

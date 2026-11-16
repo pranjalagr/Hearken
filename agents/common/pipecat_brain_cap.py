@@ -36,7 +36,12 @@ class BrainCap(BaseObserver):
         if not isinstance(frame, MetricsFrame) or frame.id in self._seen:
             return
         self._seen.add(frame.id)
-        self.requests += sum(1 for item in frame.data if isinstance(item, LLMUsageMetricsData))
+        await self.add(sum(1 for item in frame.data if isinstance(item, LLMUsageMetricsData)))
+
+    async def add(self, requests: int) -> None:
+        """Count requests sent outside the pipeline (Agent C's Thinker and Guard judge):
+        the cap is for every brain request of the call, wherever it is sent from."""
+        self.requests += requests
         if self.requests >= self._limit and not self._reached:
             self._reached = True  # end the call once, even if more usage arrives while it ends
             await self._on_reached(self.requests)

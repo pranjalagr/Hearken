@@ -1,0 +1,79 @@
+# Agent C: Talker + Thinker + Guard around the same ears, voice and tools as Agent A
+# (docs/agent_c_design.md). Every number is a starting guess from the plan's Part 2
+# decisions, named beside it; tune from real calls, never in code.
+
+# The same first line as every robot in the lab (Agent A's), so no robot gets a
+# better opening, and no brain request is spent on a greeting.
+greeting: "Namaste, Hearken Food se bol raha hoon. Bataiye?"
+
+talker:
+  # Decision 2 (changed 15 Nov 2026): free Flash-Lite allows 500 requests a day.
+  model: gemini-3.5-flash-lite
+  # Decision 18: temperature 1.0, thinking minimal (what the week-1 Talker checks used).
+  temperature: 1.0
+  # Decision 18: 1-2 sentences per reply, enforced by code (the mouth cuts the rest).
+  max_sentences: 2
+
+language:  # decision 10 (15 Nov 2026): the sticky call language
+  # A turn changes the language only with at least this many words: one "okay" or
+  # "thank you" in a Hinglish call must not flip it.
+  min_words: 4
+
+thinker:
+  # The user's choice on 15 Nov 2026: Flash-Lite too (free tier, 500 requests a day).
+  model: gemini-3.5-flash-lite
+
+ears:  # decision 24 (2 Nov 2026), the same as Agent A's: best on key details
+  model: saaras:v3-realtime
+  language: hi-IN
+  mode: translit
+  stream_type: fast
+  silence_ms: 250
+
+voice:  # decision 12, the same as Agent A's
+  model: bulbul:v4-flash
+  speaker: sunny_enhi_customer
+  language: hi-IN
+
+thinker_limits:  # decision 30 (time limits), decision 19 (retries)
+  step_s: 8.0  # one Thinker step (decision 30: ~8 s, a starting guess)
+  step_retries: 1  # then a "failed" note and a hand-over
+  lookup_s: 5.0  # one lookup or prepare tool (the backend's own normal delay is 0.3 s)
+  idle_wait_s: 1.0  # one wait for news; the loop looks again after it, so a missed ring costs at most this
+  lookup_retries: 1  # decision 19: a lookup that failed or timed out is tried once more
+  # Decision 19: "same tool, inputs and answer repeat twice in a row: stop, one hand-over".
+  # Read as the first time plus two repeats; Agent A's food_05 made 7 identical hand-over calls.
+  same_call_limit: 3
+
+notebook:
+  max_notes: 200  # decision 7: no call needs more; past it something is going round in circles
+
+feed:
+  wait_s: 0.5  # one wait for a new note; the feed looks again after it
+
+# The pack's hand-over tool (decision 13). A name, so it lives here, not in code.
+hand_over_tool: hand_over_to_human
+
+guard:  # decisions 20-23
+  judge_model: gemini-3.5-flash-lite  # the one-word judge (decision 21)
+  judge_s: 1.0  # decision 30: ~1 s, then "unclear", never a yes
+  # After an answer that needs asking again, the Talker replies first; then the Guard asks.
+  # A starting guess: about one short Talker line.
+  reask_wait_s: 1.5
+  # Pipecat's Silero voice detector needs this much speech before it says "the caller
+  # started" (its VAD_START_SECS default), so the words began that long before.
+  vad_start_s: 0.2
+  # Decision 21: a no or a stop needs only one voice; these on the partial words are one.
+  stop_words: {ruko: stop, mat: stop, wait: stop, stop: stop, nahi: "no"}
+  # Decision 19: a confirm that got no answer is sent again with the same token, up to
+  # this many more times (the backend answers "already_done" if the first one saved).
+  change_retries: 2
+  expired_reprepares: 1  # decision 19: "expired -> prepare again, ask again", once
+
+stop_check:  # decision 26: the haan-ruko model (Part 4, v4) while the robot talks
+  # The trained model, outside git (cli/haan_ruko.py train writes it here). Without the
+  # file, Agent C falls back to Pipecat's own stop-on-any-sound, as Agent A has.
+  model_path: runs/week1/haan_ruko/haan_ruko.onnx
+  line: 0.30  # Part 4's chosen line for v4
+  window_s: 2.0  # the model hears the last 2 s (lab/haan_ruko/sound.py WINDOW_S)
+  every_s: 0.1  # one check every 0.1 s while the robot talks

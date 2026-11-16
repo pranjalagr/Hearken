@@ -31,12 +31,12 @@ from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy, VADUser
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 from agents.agent_c.desk import JobDesk
-from agents.agent_c.guard.guard import Door, Guard, GuardSettings
+from agents.agent_c.guard.guard import DONE, Door, Guard, GuardSettings
 from agents.agent_c.guard.judge import TimedJudge, YesJudge, gemini_ask
 from agents.agent_c.guard.partial_words import PartialWords
 from agents.agent_c.hand_over import HANDED_OVER, HandOver
 from agents.agent_c.job import Job, Turns
-from agents.agent_c.notebook import Note, Notebook
+from agents.agent_c.notebook import CALLER, RESULT, Note, Notebook
 from agents.agent_c.settings import AgentCSettings
 from agents.agent_c.stop_check import OnnxStopModel, StopListener, StopModel
 from agents.agent_c.stop_switch import StopSwitch
@@ -385,6 +385,14 @@ class CallParts:
             self._diary.decision("thinker hand over refused", reason=reason)
             return ToolReply(REFUSED, "Not now: the caller is answering the yes-question. Other code confirms on a "
                                       "clear yes and sends a Result: line. Press no tool; wait for that line.")
+        # The same mistake a moment later (food_01, 16 Nov 2026): a Thinker step begun during
+        # the question finished after the confirm, and handed over a caller whose cancel had
+        # just been done. A change done, with no caller words since, needs no human.
+        newest = self.notebook.last((RESULT, CALLER))
+        if newest is not None and newest.kind == RESULT and newest.data.get("outcome") == DONE:
+            self._diary.decision("thinker hand over refused", reason=reason, why="change just done")
+            return ToolReply(REFUSED, "Not needed: the change is done (see the Result: line). Press no tool and "
+                                      "write one short line saying it is done.")
         return await self.hand_over.now(reason, order_no)
 
     def notes_line(self, notes: list[Note]) -> str:

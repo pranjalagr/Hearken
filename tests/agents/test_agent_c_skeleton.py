@@ -215,3 +215,24 @@ def test_with_several_keys_the_talker_keeps_one_and_the_back_office_takes_turns_
     robot = AgentC(load_settings(), keys, FakeTools(), stop_model=object())
     ring = robot._ring(10.0)
     assert made == ["k2", "k3"] and [ring.aio for _ in range(3)] == ["k2", "k3", "k2"]
+
+
+async def test_the_thinker_cannot_hand_over_right_after_a_change_is_done():
+    # 16 Nov 2026, food_01: a Thinker step begun during the question finished after the
+    # confirm and handed over a caller whose cancel had just been done.
+    from agents.agent_c.notebook import CALLER, RESULT
+
+    call = CallParts(load_settings(), Diary("c1", ListSink()), SpokenWords())
+    handed: list[str] = []
+
+    class Over:
+        async def now(self, reason, order_no=None):
+            handed.append(reason)
+            return "handed"
+
+    call.hand_over = Over()
+    call.notebook.add(RESULT, "cancel_order: done", 1, {"action": "cancel_order", "outcome": "done", "reason": ""})
+    reply = await call.thinker_hand_over("no confirm tool")
+    assert reply.status == "refused" and handed == []
+    call.notebook.add(CALLER, "mujhe insaan se baat karni hai", 2)  # the caller asks after it
+    assert await call.thinker_hand_over("caller wants a human") == "handed"

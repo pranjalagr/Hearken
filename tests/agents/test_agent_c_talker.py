@@ -164,3 +164,28 @@ def test_the_talker_reads_the_backends_reason_for_a_refusal():
                                       ToolReply("refused", "No order 4531 found. Ask the caller to repeat the number."))
     line = NoteView(SpokenWords()).line(Note(1, kind, text, 1, data), "hinglish")
     assert "No order 4531 found" in line
+
+
+async def test_speech_watch_keeps_the_words_that_arrive_before_the_voice_starts():
+    # 16 Nov 2026, food_03: from silence, the question's text came before its sound; the
+    # watch cleared its words when the sound started and reported "" for a full question.
+    from pipecat.frames.frames import BotStartedSpeakingFrame, BotStoppedSpeakingFrame, TTSTextFrame
+    from pipecat.observers.base_observer import FramePushed
+    from pipecat.processors.frame_processor import FrameDirection
+
+    from agents.agent_c.talker.speech_watch import SpeechWatch
+
+    ended: list[tuple[bool, str]] = []
+    watch = SpeechWatch(lambda: None, lambda cut, words: ended.append((cut, words)))
+
+    async def push(frame):
+        await watch.on_push_frame(FramePushed(source=None, destination=None, frame=frame,
+                                              direction=FrameDirection.DOWNSTREAM, timestamp=0))
+
+    await push(TTSTextFrame("Order 4512 par refund kar doon?", aggregated_by="sentence"))
+    await push(TTSTextFrame("Haan ya nahi?", aggregated_by="sentence"))
+    await push(BotStartedSpeakingFrame())
+    await push(BotStoppedSpeakingFrame())
+    await push(BotStartedSpeakingFrame())
+    await push(BotStoppedSpeakingFrame())
+    assert ended == [(False, "Order 4512 par refund kar doon? Haan ya nahi?"), (False, "")]  # reported once

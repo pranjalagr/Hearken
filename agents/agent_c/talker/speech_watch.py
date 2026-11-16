@@ -36,7 +36,12 @@ class SpeechWatch(BaseObserver):
             self._on_reply_written()
         elif isinstance(frame, BotStartedSpeakingFrame):
             if not self.speaking:
-                self.speaking, self._cut, self._words = True, False, []
+                # The words are NOT cleared here: when the voice starts from silence, its
+                # text arrives before its sound, and clearing here threw the question away.
+                # The Guard then saw "" for a question that played in full, sent no mark,
+                # and every yes counted as early (food_03, 16 Nov 2026). They are cleared
+                # once reported, below.
+                self.speaking, self._cut = True, False
         elif isinstance(frame, TTSTextFrame):
             self._words.append(frame.text)
         elif isinstance(frame, InterruptionFrame):
@@ -45,4 +50,5 @@ class SpeechWatch(BaseObserver):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             if self.speaking:  # the second of the pair finds it already stopped
                 self.speaking = False
-                self._on_speech_ended(self._cut, " ".join(self._words))
+                words, self._words = " ".join(self._words), []
+                self._on_speech_ended(self._cut, words)

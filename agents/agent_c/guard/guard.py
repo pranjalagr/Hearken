@@ -163,6 +163,10 @@ class Guard:
         self._turn_start_ms = None
 
     def played(self, name: str, caller_ms: int) -> None:
+        # Every step of the mark is in the diary: on 16 Nov 2026 real yeses kept counting
+        # as early and the diary could not show which step was missing.
+        current = self.moment.mark if self.moment is not None else None
+        self._diary.decision("question played", mark=name, current=current, caller_ms=caller_ms)
         if self.moment is not None and name == self.moment.mark:
             self.moment.played_ms = caller_ms
 
@@ -177,6 +181,9 @@ class Guard:
         """The voice stopped. If it was saying our question, mark its end on the wire,
         or, if the caller cut it off, ask it again: it was never fully heard."""
         moment = self.moment
+        if moment is not None:
+            self._diary.decision("voice stopped during a yes moment", cut=cut, in_flight=moment.in_flight,
+                                 spoken=spoken[-80:], mark=moment.mark)
         if moment is None or not moment.in_flight:
             return
         if cut:
@@ -188,6 +195,7 @@ class Guard:
         moment.spoken += " " + spoken
         if _ends_with(moment.spoken, moment.asking):
             moment.in_flight = False
+            self._diary.decision("question mark sent", mark=moment.mark)
             self._box.start("guard:mark", self._send_mark(moment.mark))
 
     def key(self, digit: str, caller_ms: int) -> None:

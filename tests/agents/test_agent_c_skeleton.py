@@ -175,3 +175,24 @@ def test_agent_c_never_asks_gemini_for_a_deadline_under_its_minimum(monkeypatch)
     robot._yes_judge(BrainCap(40, reached))
     robot._gemini_thinker([])
     assert len(asked) == 2 and min(asked) >= GOOGLE_MIN_TIMEOUT_S
+
+
+async def test_the_thinker_cannot_hand_over_while_the_guard_asks_for_a_yes():
+    # 16 Nov 2026, food_01: the Thinker read the caller's "haan", found no confirm tool and
+    # handed the call over in the middle of the yes-question.
+    call = CallParts(load_settings(), Diary("c1", ListSink()), SpokenWords())
+    handed: list[str] = []
+
+    class Over:
+        async def now(self, reason, order_no=None):
+            handed.append(reason)
+            return "handed"
+
+    class AskingGuard:
+        asking, confirming = True, None
+
+    call.hand_over, call.guard = Over(), AskingGuard()
+    reply = await call.thinker_hand_over("need to confirm")
+    assert reply.status == "refused" and handed == []
+    AskingGuard.asking = False
+    assert await call.thinker_hand_over("caller wants a human") == "handed" and handed == ["caller wants a human"]

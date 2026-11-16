@@ -11,6 +11,7 @@ cap with Agent A, so a comparison measures the design, not the parts. What diffe
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Any
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,6 +60,7 @@ from common.google import GOOGLE_MIN_TIMEOUT_S, google_client
 from common.wire.protocol import PIECE_MS, SAMPLE_RATE, Cleared, End, Key, Played
 from common.wire.robot_line import CallerAudio, LineClosed, RobotLine
 from engine.contract.spoken import SpokenWords
+from engine.service.replies import REFUSED, ToolReply
 from engine.service.tool_catalog import CONFIRM, ToolSpec
 
 BrainMaker = Callable[[Sequence[ToolSpec]], ThinkerBrain]
@@ -173,7 +175,7 @@ class AgentC:
         call.hand_over = HandOver(self._tools, self._settings.raw["hand_over_tool"], call.desk, say_and_end,
                                   lambda: call.words.phrase("line", "hand_over", call.language.value), self._diary)
         call.box = box
-        call.desk.on_hand_over = call.hand_over.now
+        call.desk.on_hand_over = call.thinker_hand_over
         if self._door is not None:
             call.guard = Guard(self._door, self._tools, box, call.notebook, call.desk, self._yes_judge(cap), call.words,
                                call.language, say, line.send_mark, self._guard_settings, self._diary,
@@ -356,6 +358,20 @@ class CallParts:
             self.guard.cleared(event.dropped_marks)
         else:
             self.guard.key(event.digit, event.caller_ms)
+
+    async def thinker_hand_over(self, reason: str, order_no: Any = None) -> ToolReply:
+        """The Thinker's hand-over, refused while the Guard asks for a yes or confirms one.
+
+        16 Nov 2026, food_01: the caller said "Haan sahi hai" to the yes-question, the
+        Thinker read it, decided it must confirm, found no confirm tool and handed the
+        call over, though its prompt says code confirms. A prompt rule can be skipped, so
+        code refuses; the Thinker hears why and can still hand over once the Guard is done.
+        """
+        if self.guard is not None and (self.guard.asking or self.guard.confirming is not None):
+            self._diary.decision("thinker hand over refused", reason=reason)
+            return ToolReply(REFUSED, "Not now: the caller is answering the yes-question. Other code confirms on a "
+                                      "clear yes and sends a Result: line. Press no tool; wait for that line.")
+        return await self.hand_over.now(reason, order_no)
 
     def notes_line(self, notes: list[Note]) -> str:
         """The Talker's view of new notes, with slots; the speaker learns it too, so the

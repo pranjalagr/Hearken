@@ -2,6 +2,7 @@
 ask_thinker, and the Guard's door is nowhere the AI can reach."""
 
 import ast
+import asyncio
 from pathlib import Path
 
 from pipecat.frames.frames import TTSSpeakFrame
@@ -236,3 +237,31 @@ async def test_the_thinker_cannot_hand_over_right_after_a_change_is_done():
     assert reply.status == "refused" and handed == []
     call.notebook.add(CALLER, "mujhe insaan se baat karni hai", 2)  # the caller asks after it
     assert await call.thinker_hand_over("caller wants a human") == "handed"
+
+
+async def test_after_a_hand_over_code_ends_the_call_even_if_the_caller_cut_the_line():
+    # 16 Nov 2026, food_05: the caller spoke over the hand-over line, the cut dropped the
+    # end frame queued behind it, and the call stayed open.
+    from agents.agent_c.hand_over import HANDED_OVER
+
+    call = CallParts(load_settings(), Diary("c1", ListSink()), SpokenWords())
+    robot = AgentC(load_settings(), Keys("g", "s"), FakeTools(), stop_model=object())
+    line_text = "Main aapko hamare team member se connect kar raha hoon."
+    queued, ended = [], []
+
+    class Task:
+        async def queue_frames(self, frames):
+            queued.append(frames[0].text)
+            # The first time the caller cuts it off; the second time it plays to the end.
+            asyncio.get_running_loop().call_soon(call.speech_ended, len(queued) == 1, line_text)
+
+    class Line:
+        async def end(self, reason):
+            ended.append(("line", reason))
+
+    class Box:
+        def end(self, reason):
+            ended.append(("box", reason))
+
+    await asyncio.wait_for(robot._end_after_line(Task(), Line(), Box(), call, line_text), 5)
+    assert queued == [line_text, line_text] and ended == [("line", HANDED_OVER), ("box", HANDED_OVER)]

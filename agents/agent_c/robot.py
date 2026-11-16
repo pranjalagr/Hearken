@@ -10,13 +10,15 @@ cap with Agent A, so a comparison measures the design, not the parts. What diffe
 
 from __future__ import annotations
 
+import asyncio
+
 from collections.abc import Callable, Sequence
 from typing import Any
 from dataclasses import dataclass
 from pathlib import Path
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame
+from pipecat.frames.frames import LLMMessagesAppendFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -178,9 +180,11 @@ class AgentC:
             await task.queue_frames([TTSSpeakFrame(text)])
 
         async def say_and_end(text: str) -> None:
-            """The hand-over line, then the end: the pipeline ends once it has played."""
+            """The hand-over line, then the end. Code ends the call once the line has played
+            (or at the time limit): an end frame queued behind the line was dropped when
+            the caller spoke over it, and the call stayed open (food_05, 16 Nov 2026)."""
             call.speaker.heard(text)
-            await task.queue_frames([TTSSpeakFrame(text), EndFrame()])
+            box.start("hand over end", self._end_after_line(task, line, box, call, text))
 
         call.hand_over = HandOver(self._tools, self._settings.raw["hand_over_tool"], call.desk, say_and_end,
                                   lambda: call.words.phrase("line", "hand_over", call.language.value), self._diary)
@@ -197,11 +201,27 @@ class AgentC:
         await task.queue_frames([TTSSpeakFrame(self._settings.greeting)])
         await PipelineRunner(handle_sigint=False).run(task)
         if call.hand_over.done:
-            # Handed over and the line has played: say so on the wire (decision 13).
-            await line.end(HANDED_OVER)
+            pass  # the hand-over ends the call itself, once its line has played (_end_after_line)
         elif call.hang_up.reason is not None:
             # The Talker said goodbye and hung up; the goodbye has played.
             await line.end(call.hang_up.reason)
+
+    async def _end_after_line(self, task: PipelineTask, line: RobotLine, box: CallBox, call: CallParts,
+                              text: str) -> None:
+        section = self._settings.section("hand_over_end")
+        wait_s, tries = float(section["wait_s"]), int(section["tries"])
+        deadline = asyncio.get_running_loop().time() + wait_s
+        for _ in range(tries):
+            played = call.await_spoken(text)
+            await task.queue_frames([TTSSpeakFrame(text)])
+            try:
+                if await asyncio.wait_for(played, max(0.0, deadline - asyncio.get_running_loop().time())):
+                    break  # heard to the end
+            except TimeoutError:
+                break
+        self._diary.decision("hang up", reason=HANDED_OVER)
+        await line.end(HANDED_OVER)
+        box.end(HANDED_OVER)
 
     async def _cap_reached(self, line: RobotLine, box: CallBox, requests: int) -> None:
         # As Agent A: the wire first, so the lab records why the call ended, then the box.
@@ -312,6 +332,7 @@ class CallParts:
         self.hand_over: HandOver | None = None  # set once the call has begun
         # The Talker's end_call: refused while the back office still works on the job.
         self.hang_up = HangUp(diary, not_now=lambda: self.desk.why_not_end())
+        self._spoken_waiters: list[tuple[str, asyncio.Future]] = []  # lines waiting to be heard to the end
         self.box: CallBox | None = None
         self._diary = diary
         self.switch = StopSwitch(name="stop-switch")
@@ -414,7 +435,20 @@ class CallParts:
         if self.feed is not None:
             self.feed.talker_replied()
 
+    def await_spoken(self, text: str) -> asyncio.Future:
+        """A future that is True once the voice has said `text` to its end, False if it was cut."""
+        waiter = asyncio.get_running_loop().create_future()
+        self._spoken_waiters.append((text, waiter))
+        return waiter
+
     def speech_ended(self, cut: bool, spoken: str) -> None:
+        for text, waiter in list(self._spoken_waiters):
+            tail = "".join(text.split()[-3:]).lower()
+            if waiter.done():
+                self._spoken_waiters.remove((text, waiter))
+            elif cut or tail in "".join(spoken.split()).lower():
+                waiter.set_result(not cut)
+                self._spoken_waiters.remove((text, waiter))
         if self.feed is not None:
             self.feed.speech_ended(cut)
         if self.guard is not None:

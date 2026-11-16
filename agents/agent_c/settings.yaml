@@ -53,6 +53,13 @@ feed:
 
 # The pack's hand-over tool (decision 13). A name, so it lives here, not in code.
 hand_over_tool: hand_over_to_human
+# After a hand-over the call ends once its line has played, ended by code, not by a frame
+# in the voice's queue: on 16 Nov 2026 (food_05) the caller spoke over the line, the cut
+# dropped the queued end with it, and the call stayed open. If the line is cut it is said
+# again, at most this many times in all; the call ends at the time limit regardless.
+hand_over_end:
+  wait_s: 15.0  # a guess: the line is ~4 s, plus a caller talking over it
+  tries: 2
 
 guard:  # decisions 20-23
   judge_model: gemini-3.5-flash-lite  # the one-word judge (decision 21)

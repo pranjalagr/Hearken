@@ -173,7 +173,9 @@ async def run_call(plan: CallPlan, pack: Pack, run_dir: Path, board: BellBoard, 
         # 20 ms pieces for the other calls (on 1 Nov 2026, doing it here froze
         # every live call by up to 0.4 s).
         await asyncio.to_thread(recorder.save, folder, _about(plan, about_caller))
-        if outcome.label == FINE:
+        # A robot that broke after a limit broke because of the limit: the guard ends such a
+        # call at once (16 Nov 2026), which can look like a broken wire, so the limit wins.
+        if outcome.label in (FINE, ROBOT_FAILURE):
             limit = robot_hit_a_limit(folder / "robot.jsonl")
             if limit:
                 # Decision 32: a speed or credit limit is the lab's problem, rerun, never the robot's.

@@ -326,3 +326,60 @@ def test_a_refused_key_stops_the_batch_before_any_call_and_counts_as_the_labs_pr
     diary.write_text(json.dumps({"kind": "error", "text": "Unknown error occurred: 403 Forbidden. free tier is not available"}) + "\n",
                      encoding="utf-8")
     assert "403" in robot_hit_a_limit(diary)
+
+
+def test_the_key_order_uses_the_first_working_key_and_moves_on_when_one_fails(monkeypatch):
+    # The user's choice, 16 Nov 2026: a full or refused key moves to the next in
+    # lab/key_order.yaml instead of stopping the run to ask.
+    import os
+
+    from common.env import GEMINI_KEY_CHOICE
+    from lab.runner.key_order import KeyOrder, load_order
+
+    monkeypatch.delenv(GEMINI_KEY_CHOICE, raising=False)
+    full = {"G1"}  # keys the service refuses
+
+    def gemini():
+        name = os.environ[GEMINI_KEY_CHOICE]
+        return f"{name}: 429" if name in full else None
+
+    said: list[str] = []
+    keys = KeyOrder({"gemini": ["G1", "G2", "G3"]}, {"gemini": gemini}, say=said.append)
+    assert keys.choose() == [] and keys.chosen() == {"gemini": "G2"} and os.environ[GEMINI_KEY_CHOICE] == "G2"
+    full.add("G2")  # G2 fills up mid-run
+    assert keys.choose() == [] and keys.chosen() == {"gemini": "G3"}
+    full.discard("G1")  # a passed-over key is never tried again in this run
+    full.add("G3")
+    assert keys.choose() and keys.chosen() == {"gemini": "G3"}
+    assert all("G" in line for line in said) and not any("AIza" in line for line in said)  # names only
+    assert set(load_order()) <= {"gemini", "sarvam", "groq"}  # the real file loads
+
+
+async def test_before_a_rerun_the_batch_asks_for_the_next_key_and_stops_if_none_is_left(tmp_path, monkeypatch):
+    def broken_ear(self, piece, caller_ms):
+        raise RuntimeError("a service limit")
+
+    monkeypatch.setattr(run_call_module.ScriptedCaller, "heard", broken_ear)
+    asked = []
+
+    async def no_keys_left():
+        asked.append(1)
+        return "gemini: every key in lab/key_order.yaml failed"
+
+    plan = CallPlan("limit", TASKS["food_01_cancel_prepaid"], PERFECT, "safe", 1)
+    batch = await run_batch([plan], FoodPack(), make_run_dir(tmp_path, "keys"), SETTINGS, before_rerun=no_keys_left)
+    assert asked == [1] and [o.label for o in batch.outcomes] == [LAB_PROBLEM]  # stopped, not rerun on a dead key
+    assert "every key" in batch.stopped
+
+
+def test_sarvam_out_of_credit_is_the_labs_problem(tmp_path):
+    # 16 Nov 2026: two Sarvam keys answered 402 "No credits available"; mid-call that must
+    # rerun on the next key, not count against the robot.
+    import json
+
+    from lab.runner.run_call import robot_hit_a_limit
+
+    diary = tmp_path / "robot.jsonl"
+    diary.write_text(json.dumps({"kind": "error", "text": 'HTTP 402 {"error":{"message":"No credits available.",'
+                                                          '"code":"insufficient_quota_error"}}'}) + "\n", encoding="utf-8")
+    assert robot_hit_a_limit(diary) is not None

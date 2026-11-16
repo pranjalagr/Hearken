@@ -1,0 +1,14 @@
+# Which key of each service a lab run uses, in order (the user's choice, 16 Nov 2026).
+# Names of lines in pakka/.env only, never the keys themselves.
+#
+# Before a run the lab uses the first key in each list that answers a tiny request.
+# When a call ends as a lab problem (a limit, a refused key), the lab checks again
+# before the rerun and moves to the next key that answers. If every key of a service
+# fails, the run stops. A call that hit a limit is a lab problem and rerun, never
+# counted against the robot (decision 32), so switching keys can't change a score.
+#
+# Left out on purpose (checked 16 Nov 2026): GEMINI_API_KEY_2 (its project has no
+# free tier, 403), SARVAM_API_KEY_2 and _3 (no credit left, 402).
+gemini: [GEMINI_API_KEY, GEMINI_API_KEY_3]
+sarvam: [SARVAM_API_KEY_4, SARVAM_API_KEY]
+groq: [GROQ_API_KEY_2, GROQ_API_KEY_3, GROQ_API_KEY_4, GROQ_API_KEY]

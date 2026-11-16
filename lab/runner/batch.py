@@ -14,6 +14,7 @@ import json
 import platform
 import subprocess
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -61,7 +62,10 @@ def plan_calls(tasks: list[Task], robots: list[RobotSpec], repeats: int, mode_fo
     return plans
 
 
-async def run_batch(plans: list[CallPlan], pack: Pack, run_dir: Path, settings: LabSettings) -> BatchResult:
+async def run_batch(plans: list[CallPlan], pack: Pack, run_dir: Path, settings: LabSettings,
+                    before_rerun: Callable[[], Awaitable[str | None]] | None = None) -> BatchResult:
+    """`before_rerun`: run after a lab problem, before the call is tried again (the next
+    key in lab/key_order.yaml); it returns why the batch must stop, or None."""
     started = time.perf_counter()
     result = BatchResult()
     board = BellBoard()
@@ -92,6 +96,12 @@ async def run_batch(plans: list[CallPlan], pack: Pack, run_dir: Path, settings: 
                 if outcome.label != LAB_PROBLEM:
                     ended.append((outcome, plan))
                     return
+                if before_rerun is not None:
+                    stop = await before_rerun()
+                    if stop is not None:
+                        result.stopped = stop
+                        broken.set()
+                        return
                 attempt = replace(plan, call_id=f"{plan.call_id}-again{number}", attempt=number + 1)
             # It kept breaking for lab reasons: the lab is broken, not the robot (L4).
             result.stopped = f"{plan.call_id} kept breaking: {outcome.why}"

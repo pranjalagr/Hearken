@@ -267,7 +267,10 @@ LIMIT_SIGNS = ("Too Many Requests", "RESOURCE_EXHAUSTED", "quota_exceeded", "rat
                # A key the service refuses is the lab's setup, never the robot: on 15 Nov 2026 a
                # key whose project lost Gemini's free tier ("403 Forbidden ... free tier is not
                # available") left a robot with no brain for 9 calls the lab called "fine".
-               "403 Forbidden", "PERMISSION_DENIED", "API key not valid", "free tier is not available")
+               "403 Forbidden", "PERMISSION_DENIED", "API key not valid", "free tier is not available",
+               # Sarvam out of credit answers 402 "No credits available" / insufficient_quota_error
+               # (seen on two keys on 16 Nov 2026): the lab's credit, so a rerun on the next key.
+               "insufficient_quota", "No credits available")
 
 
 def robot_hit_a_limit(diary: Path) -> str | None:

@@ -87,6 +87,37 @@ def write_stalls(path: Path, stalls: list[Stall]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+class KeyLog:
+    """Which key names a run used and when it moved on (names only, never keys)."""
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def add(self, line: str) -> None:
+        self.lines.append(f"{time.strftime('%H:%M:%S')} {line}")
+        print(line, flush=True)
+
+    def write(self, path: Path) -> None:
+        if self.lines:
+            path.write_text("# Keys used (lab/key_order.yaml)\n\n" + "".join(f"- {line}\n" for line in self.lines),
+                            encoding="utf-8")
+
+
+def _next_keys(keys, maker):
+    """Before a call is rerun: move to the next working key if the current one failed."""
+
+    async def check() -> str | None:
+        before = keys.chosen().get("groq")
+        problems = await asyncio.to_thread(keys.choose)  # tiny blocking requests: off the event loop
+        if problems:
+            return "; ".join(problems)
+        if keys.chosen().get("groq") != before:
+            await maker.new_brain_key()  # the caller's brain keeps its key inside its client
+        return None
+
+    return check
+
+
 async def run(args: argparse.Namespace) -> Path:
     settings = load_settings()
     if args.at_once:
@@ -103,6 +134,8 @@ async def run(args: argparse.Namespace) -> Path:
         wanted = args.tasks.split(",")
         tasks = [task for task in tasks if any(task.id.startswith(prefix) for prefix in wanted)]
     caller_info: dict = {}
+    keys = None  # the key order, for runs with AI robots
+    key_log = KeyLog()
     if args.caller == "chain":
         # Real ears, brain and voice (Part 3): the puppet needs real speech for them to hear.
         caller_settings = load_caller_settings()
@@ -114,14 +147,20 @@ async def run(args: argparse.Namespace) -> Path:
         if missing:
             raise SystemExit(f"missing in pakka/.env: {', '.join(missing)}")
         if agents:
-            from lab.runner.key_check import refused_keys
+            from lab.runner.key_check import gemini_accepts, groq_accepts, sarvam_accepts
+            from lab.runner.key_order import KeyOrder, load_order
 
             # One tiny request per key before any call: a refused or full key must not cost
-            # a whole batch (15 Nov 2026). The caller's brain is checked too.
-            groq_brain = caller_settings.brain_model if caller_settings.brain_company == "groq" else None
-            refused = refused_keys(agents[0].models.get("brain", ""), caller_model=groq_brain)
-            if refused:
-                raise SystemExit("a service refused a key, so no calls were started:\n  " + "\n  ".join(refused))
+            # a whole batch (15 Nov 2026). The first key that answers, in the user's order
+            # (lab/key_order.yaml), is used; the caller's brain is checked too.
+            brain_model = agents[0].models.get("brain", "")
+            checks = {"gemini": lambda: gemini_accepts(brain_model), "sarvam": sarvam_accepts}
+            if caller_settings.brain_company == "groq":
+                checks["groq"] = lambda: groq_accepts(caller_settings.brain_model)
+            keys = KeyOrder(load_order(), checks, say=key_log.add)
+            problems = await asyncio.to_thread(keys.choose)
+            if problems:
+                raise SystemExit("no working key, so no calls were started:\n  " + "\n  ".join(problems))
         robots = [replace(robot, voice="sarvam") if isinstance(robot, PuppetRobot) else robot for robot in robots]
         caller_info = {"caller": "chain", "caller_settings": caller_settings.as_dict()}
 
@@ -152,10 +191,12 @@ async def run(args: argparse.Namespace) -> Path:
         watch = FreezeWatch()
         watch.start()
         try:
-            batch = await run_batch(plans, FoodPack(), run_dir, settings)
+            batch = await run_batch(plans, FoodPack(), run_dir, settings,
+                                    before_rerun=_next_keys(keys, maker) if keys is not None else None)
         finally:
             await watch.stop()
             write_stalls(run_dir / "stalls.md", watch.stalls)
+            key_log.write(run_dir / "keys.md")
     finally:
         if args.caller == "chain":
             await maker.close()

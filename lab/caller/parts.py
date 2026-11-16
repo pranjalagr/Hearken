@@ -64,6 +64,7 @@ class RealCaller:
         # Before any call starts, so no live call waits for them.
         shared_tls()
         self._client = _brain_client(self._settings)
+        self._old_clients: list[Any] = []  # replaced after a key switch, closed with the caller
 
     async def warm_up(self) -> None:
         """The first request in a program loads more code and opens the first secure
@@ -73,7 +74,17 @@ class RealCaller:
         if self._settings.brain_company == "groq":
             await self._client.get("/models")
 
+    async def new_brain_key(self) -> None:
+        """The brain's client holds its key, so a switch of key (lab/key_order.yaml) makes a
+        new one. The old one stays open until the batch ends: another call made before the
+        switch may still be using it."""
+        self._old_clients.append(self._client)
+        self._client = _brain_client(self._settings)
+        await self.warm_up()
+
     async def close(self) -> None:
+        for old in self._old_clients:
+            await (getattr(old, "aclose", None) or old.aio.aclose)()
         close = getattr(self._client, "aclose", None) or self._client.aio.aclose
         await close()
 

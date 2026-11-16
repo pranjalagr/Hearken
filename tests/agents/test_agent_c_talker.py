@@ -148,3 +148,19 @@ def test_the_call_parts_feed_the_number_check_with_every_note_and_turn():
     assert line.startswith("NOTES: find_order: ok;")
     call.caller_finished("haan 4561 wala")
     assert not call.speaker.prepare("Order [order] ka status sun lijiye.").safe
+
+
+def test_the_talker_reads_the_backends_reason_for_a_refusal():
+    # 16 Nov 2026, food_02: the Talker saw only "prepare_cancel_order: refused" and made up
+    # "khana dispatch ho chuka hai" for what was really "No order 4531 found".
+    from agents.agent_c.notebook import Note
+    from agents.agent_c.talker.note_view import NoteView
+    from agents.agent_c.thinker.copy_notes import note_for_reply
+    from agents.agent_c.thinker.brain import ToolCall
+    from engine.contract.spoken import SpokenWords
+    from engine.service.replies import ToolReply
+
+    kind, text, data = note_for_reply(ToolCall("prepare_cancel_order", {"order_no": "4531", "customer_name": "Aman"}),
+                                      ToolReply("refused", "No order 4531 found. Ask the caller to repeat the number."))
+    line = NoteView(SpokenWords()).line(Note(1, kind, text, 1, data), "hinglish")
+    assert "No order 4531 found" in line

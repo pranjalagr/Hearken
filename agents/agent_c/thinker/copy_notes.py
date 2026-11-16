@@ -21,7 +21,11 @@ STILL_GOOD_WORDS = "still good"
 def note_for_reply(call: ToolCall, reply: ToolReply) -> tuple[str, str, dict]:
     """(kind, text, data) for one backend answer. A prepared change becomes a
     "need yes" note carrying its token for the Guard; everything else is a fact."""
-    data = {"tool": call.name, "inputs": dict(call.inputs), "status": reply.status, "data": dict(reply.data)}
+    # The backend's own words go in too: the Talker's view of a refusal reads them from here.
+    # Without them, on 16 Nov 2026 (food_02) it saw only "refused" for "No order 4531 found"
+    # and made up a reason ("khana dispatch ho chuka hai").
+    data = {"tool": call.name, "inputs": dict(call.inputs), "status": reply.status, "data": dict(reply.data),
+            "message": reply.message}
     if call.name.startswith(PREPARE_PREFIX) and reply.status == OK and reply.data.get("token"):
         data["action"] = call.name[len(PREPARE_PREFIX):]
         return NEED_YES, str(reply.data.get("summary") or reply.message), data

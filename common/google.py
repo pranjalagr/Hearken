@@ -21,6 +21,12 @@ from typing import Any
 
 import httpx
 
+# Gemini refuses a request whose deadline is under 10 s ("Manually set deadline 8s is too
+# short. Minimum allowed deadline is 10s", 400). A caller that needs a shorter limit (Agent
+# C's 8 s Thinker step, 1 s Guard judge; 16 Nov 2026) gives the client this and holds its
+# own limit with asyncio.wait_for.
+GOOGLE_MIN_TIMEOUT_S = 10.0
+
 
 def google_client(key: str, timeout_s: float, http_client: httpx.Client | None = None) -> Any:
     """timeout_s is the caller's policy (a voice clip needs far less than a

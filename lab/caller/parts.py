@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from common.env import groq_key, groq_key_name, load_env, require, sarvam_key, sarvam_key_name
+from common.google import GOOGLE_MIN_TIMEOUT_S
 from common.groq import groq_client
 from lab.caller.brain.brain import Brain, gemini_ask, groq_ask
 from lab.caller.chain import ChainCaller, ChainParts
@@ -26,7 +27,6 @@ CLIPS = ROOT / "lab" / "sounds" / "caller"
 NOISE = ROOT / "lab" / "sounds" / "noise"
 # The chosen setup for Sarvam's ears (decision 24).
 SARVAM_FAST = {"silence_ms": 250, "stream_type": "fast"}
-GOOGLE_MIN_TIMEOUT_S = 10.0
 
 
 def _brain_client(settings: CallerSettings) -> Any:

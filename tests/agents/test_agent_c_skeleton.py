@@ -155,3 +155,23 @@ def test_the_greeting_is_a_fixed_line_not_a_brain_request():
     # Same opening as Agent A: queued as a TTSSpeakFrame, so no Talker request is spent.
     source = (ROOT / "agents" / "agent_c" / "robot.py").read_text(encoding="utf-8")
     assert "TTSSpeakFrame(self._settings.greeting)" in source and TTSSpeakFrame
+
+
+def test_agent_c_never_asks_gemini_for_a_deadline_under_its_minimum(monkeypatch):
+    # 16 Nov 2026: the Thinker's client was made with its 8 s step limit, and Gemini refused
+    # every request ("Minimum allowed deadline is 10s"); the 1 s judge would have too.
+    import agents.agent_c.robot as robot_module
+    from agents.common.pipecat_brain_cap import BrainCap
+    from common.google import GOOGLE_MIN_TIMEOUT_S
+
+    asked: list[float] = []
+    monkeypatch.setattr(robot_module, "google_client", lambda key, timeout_s: asked.append(timeout_s) or object())
+    monkeypatch.setattr(robot_module, "GeminiThinker", lambda *args, **kwargs: object())
+    robot = AgentC(load_settings(), Keys("g", "s"), FakeTools(), stop_model=object())
+
+    async def reached(n):
+        pass
+
+    robot._yes_judge(BrainCap(40, reached))
+    robot._gemini_thinker([])
+    assert len(asked) == 2 and min(asked) >= GOOGLE_MIN_TIMEOUT_S

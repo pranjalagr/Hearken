@@ -55,7 +55,7 @@ from agents.common.pipecat_diary import DiaryObserver
 from agents.common.pipecat_hangup import END_CALL_SCHEMA, HangUp
 from agents.common.pipecat_line import LineTransport
 from agents.common.tools import Tools
-from common.google import google_client
+from common.google import GOOGLE_MIN_TIMEOUT_S, google_client
 from common.wire.protocol import PIECE_MS, SAMPLE_RATE, Cleared, End, Key, Played
 from common.wire.robot_line import CallerAudio, LineClosed, RobotLine
 from engine.contract.spoken import SpokenWords
@@ -201,12 +201,14 @@ class AgentC:
         if self._judge is not None:
             return self._judge
         section = self._settings.section("guard")
-        client = google_client(self._keys.gemini, float(section["judge_s"]))
+        # Gemini's own minimum deadline; the judge's ~1 s limit is held by TimedJudge.
+        client = google_client(self._keys.gemini, max(float(section["judge_s"]), GOOGLE_MIN_TIMEOUT_S))
         ask = gemini_ask(client, section["judge_model"], JUDGE_PROMPT.read_text(encoding="utf-8"))
         return TimedJudge(ask, float(section["judge_s"]), lambda: cap.add(1), self._diary.error)
 
     def _gemini_thinker(self, tools: Sequence[ToolSpec]) -> ThinkerBrain:
-        client = google_client(self._keys.gemini, self._limits.step_s)
+        # Gemini's own minimum deadline; the ~8 s step limit is held by the Thinker loop (try_live).
+        client = google_client(self._keys.gemini, max(self._limits.step_s, GOOGLE_MIN_TIMEOUT_S))
         return GeminiThinker(client, self._settings.thinker["model"], self._settings.thinker_prompt, tools,
                              on_usage=self._thinker_usage)
 

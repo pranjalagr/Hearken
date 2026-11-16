@@ -219,3 +219,11 @@ async def test_speech_watch_counts_the_voices_words_only_as_the_output_plays_the
     await push(question, output)
     await push(BotStoppedSpeakingFrame(), output)
     assert ended == [(False, "Ek second."), (False, "Haan ya nahi?")]
+
+
+def test_a_notes_line_the_talker_copied_is_never_spoken():
+    # 16 Nov 2026, food_03: "NOTES: refund missing item...; amount ₹380" was read to the caller.
+    view, speaker, _ = talker()
+    speaker.given("NOTES: refund missing item; order no 4512; amount ₹380")
+    speech = speaker.prepare("NOTES: refund missing item; order no 4512; amount ₹380.")
+    assert speech.safe and "NOTES" not in speech.spoken and speech.why == "a NOTES line, not a reply"

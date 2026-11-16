@@ -53,6 +53,11 @@ class Speaker:
     def prepare(self, reply: str) -> Speech:
         language = self._language.value
         text = first_sentences(reply, self._max)
+        if "notes:" in text.lower():
+            # The Talker copied a NOTES line: never read the back office's notes to the caller.
+            # 16 Nov 2026, food_03: "NOTES: refund missing item...; amount ₹380" was spoken, and
+            # the number check let it through because the numbers were in the notes.
+            return Speech(text, spell_for_voice(self.safe_line(), language), True, "a NOTES line, not a reply")
         stray = stray_numbers(text, self._known)
         unknown = sorted(used_slots(text) - set(self._view.slots))
         if stray or unknown:

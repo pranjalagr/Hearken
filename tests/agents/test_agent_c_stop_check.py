@@ -144,3 +144,22 @@ def test_without_a_model_file_agent_c_says_so_and_falls_back_to_pipecats_own_sto
     raw = {**settings.raw, "stop_check": {**settings.section("stop_check"), "model_path": "runs/no_such_dir/none.onnx"}}
     robot = AgentC(dataclasses.replace(settings, raw=raw), Keys("g", "s"), None, diary=Diary("c1", sink))
     assert robot._stop_model is None and "no stop-or-keep model" in sink.records[0]["text"]
+
+
+async def test_agent_cs_own_pipeline_parts_let_the_call_start_and_frames_through():
+    # 16 Nov 2026: the stop switch forwarded nothing, so the StartFrame never reached the
+    # end of the pipeline and Agent C's first real call never began. Every part tested
+    # alone had passed; this runs Agent C's own parts together, as a call does.
+    from pipecat.frames.frames import TextFrame
+    from pipecat.pipeline.pipeline import Pipeline
+    from pipecat.processors.aggregators.llm_context import LLMContext
+    from pipecat.tests.utils import run_test
+
+    from agents.agent_c.robot import CallParts
+    from agents.agent_c.talker.mouth import Mouth
+    from engine.contract.spoken import SpokenWords
+
+    call = CallParts(load_settings(), Diary("c1", ListSink()), SpokenWords())
+    parts = Pipeline([call.switch, Mouth(call.speaker, LLMContext(), Diary("c1", ListSink()))])
+    # A time limit: a part that swallows frames makes run_test wait forever, not fail.
+    await asyncio.wait_for(run_test(parts, frames_to_send=[TextFrame("hello")], expected_down_frames=[TextFrame]), 10)

@@ -66,6 +66,19 @@ def _agent_a(name: str, mode: str, background: bool = False) -> AgentRobot:
                       extra_args=("--background-tools",) if background else (), models=models)
 
 
+def _agent_c(name: str) -> AgentRobot:
+    import yaml
+
+    data = yaml.safe_load((AGENTS / "agent_c" / "settings.yaml").read_text(encoding="utf-8"))
+    # "brain" is the model the lab's key check asks before a run; the Talker, Thinker
+    # and Guard judge all use Flash-Lite on the free tier (decision 2, 15 Nov 2026).
+    models = {"brain": data["talker"]["model"], "talker": data["talker"]["model"], "thinker": data["thinker"]["model"],
+              "judge": data["guard"]["judge_model"], "ears": data["ears"]["model"],
+              "voice": f"{data['voice']['model']}/{data['voice']['speaker']}"}
+    # Decision 3: C runs in safe mode WITH the ticket check: only its Guard can confirm.
+    return AgentRobot(name, "cli.agent_c", SAFE, ticket_check=True, models=models)
+
+
 ROBOTS = {
     "puppet:perfect": PuppetRobot("perfect"),
     "puppet:careless": PuppetRobot("careless"),
@@ -73,6 +86,7 @@ ROBOTS = {
     "agent:a": _agent_a("agent:a", SAFE),
     # Part 7's extra run: Pipecat's one-line background-tool switch, in plain mode.
     "agent:a-background": _agent_a("agent:a-background", PLAIN, background=True),
+    "agent:c": _agent_c("agent:c"),
 }
 
 

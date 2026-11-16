@@ -18,20 +18,24 @@ from pathlib import Path
 
 import yaml
 
-from common.env import GEMINI_KEY_CHOICE, GROQ_KEY_CHOICE, SARVAM_KEY_CHOICE
+from common.env import GEMINI_KEY_CHOICE, GEMINI_POOL_CHOICE, GROQ_KEY_CHOICE, SARVAM_KEY_CHOICE
 
 ORDER_FILE = Path(__file__).resolve().parents[1] / "key_order.yaml"
 
 # The variable common/env.py reads for each service.
 CHOICE_OF = {"gemini": GEMINI_KEY_CHOICE, "sarvam": SARVAM_KEY_CHOICE, "groq": GROQ_KEY_CHOICE}
+# Services whose robots can take turns over several keys, and the variable naming them all.
+POOL_OF = {"gemini": GEMINI_POOL_CHOICE}
 
 
-def load_order(path: Path = ORDER_FILE) -> dict[str, list[str]]:
+def load_order(path: Path = ORDER_FILE) -> tuple[dict[str, list[str]], set[str]]:
+    """The key names per service, and the services that rotate over all their keys."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    unknown = set(raw) - set(CHOICE_OF)
+    rotate = set(raw.pop("rotate", None) or [])
+    unknown = (set(raw) - set(CHOICE_OF)) | (rotate - set(POOL_OF))
     if unknown:
         raise ValueError(f"key order: unknown services {sorted(unknown)}")
-    return {service: [str(name) for name in names] for service, names in raw.items()}
+    return {service: [str(name) for name in names] for service, names in raw.items()}, rotate
 
 
 @dataclass
@@ -42,18 +46,55 @@ class KeyOrder:
     order: dict[str, list[str]]
     checks: dict[str, Callable[[], str | None]]
     say: Callable[[str], None] = print
+    rotate: set[str] = field(default_factory=set)  # services whose robots take turns over every working key
     _at: dict[str, int] = field(default_factory=dict)
+    _pool: dict[str, list[str]] = field(default_factory=dict)  # the working keys of a rotated service
+    _dropped: set[str] = field(default_factory=set)  # keys that failed: never tried again this run
 
     def chosen(self) -> dict[str, str]:
-        return {service: self.order[service][at] for service, at in self._at.items()}
+        chosen = {service: self.order[service][at] for service, at in self._at.items()}
+        chosen.update({service: ",".join(pool) for service, pool in self._pool.items()})
+        return chosen
 
     def choose(self) -> list[str]:
+        problems = self._choose_rotated()
+        return problems + self._choose_single()
+
+    def _choose_rotated(self) -> list[str]:
+        """Every key of the service that still answers goes into its pool; the first is also
+        the single chosen key (Agent C's Talker, and any robot that holds one key)."""
+        problems = []
+        for service in [s for s in self.checks if s in self.rotate]:
+            working = []
+            for name in self.order.get(service) or []:
+                if name in self._dropped:
+                    continue
+                os.environ[CHOICE_OF[service]] = name
+                why = self.checks[service]()
+                if why is None:
+                    working.append(name)
+                else:
+                    self._dropped.add(name)
+                    self.say(f"key {name} failed: {why[:160]}")
+            if not working:
+                problems.append(f"{service}: every key in lab/key_order.yaml failed")
+                continue
+            os.environ[CHOICE_OF[service]] = working[0]
+            os.environ[POOL_OF[service]] = ",".join(working)
+            if self._pool.get(service) != working:
+                self.say(f"{service}: taking turns over {', '.join(working)}")
+            self._pool[service] = working
+        return problems
+
+    def _choose_single(self) -> list[str]:
         """Keep each service's current key if it answers, else move down its list.
         Returns the services with no working key left (the run must stop); empty if all
         are fine. Keys passed over are never tried again in this run: a key full for
         the day stays full."""
         problems = []
         for service, check in self.checks.items():
+            if service in self.rotate:
+                continue
             names = self.order.get(service) or []
             at = self._at.get(service, 0)
             while at < len(names):

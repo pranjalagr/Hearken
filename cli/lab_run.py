@@ -171,7 +171,8 @@ async def run(args: argparse.Namespace) -> Path:
             checks = {"gemini": lambda: gemini_accepts(brain_model), "sarvam": sarvam_accepts}
             if caller_settings.brain_company == "groq":
                 checks["groq"] = lambda: groq_accepts(caller_settings.brain_model)
-            keys = KeyOrder(load_order(), checks, say=key_log.add)
+            order, rotate = load_order()
+            keys = KeyOrder(order, checks, say=key_log.add, rotate=rotate)
             problems = await asyncio.to_thread(keys.choose)
             if problems:
                 raise SystemExit("no working key, so no calls were started:\n  " + "\n  ".join(problems))

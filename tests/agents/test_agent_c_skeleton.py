@@ -196,3 +196,22 @@ async def test_the_thinker_cannot_hand_over_while_the_guard_asks_for_a_yes():
     assert reply.status == "refused" and handed == []
     AskingGuard.asking = False
     assert await call.thinker_hand_over("caller wants a human") == "handed" and handed == ["caller wants a human"]
+
+
+def test_with_several_keys_the_talker_keeps_one_and_the_back_office_takes_turns_over_the_rest(monkeypatch):
+    # The owner's choice, 16 Nov 2026: one key went over Gemini's 15 requests a minute.
+    import agents.agent_c.robot as robot_module
+
+    made: list[str] = []
+
+    class Client:
+        def __init__(self, key):
+            made.append(key)
+            self.aio = key
+
+    monkeypatch.setattr(robot_module, "google_client", lambda key, timeout_s: Client(key))
+    keys = Keys("k1", "s", gemini_pool=("k1", "k2", "k3"))
+    assert keys.back_office() == ["k2", "k3"] and Keys("k1", "s").back_office() == ["k1"]
+    robot = AgentC(load_settings(), keys, FakeTools(), stop_model=object())
+    ring = robot._ring(10.0)
+    assert made == ["k2", "k3"] and [ring.aio for _ in range(3)] == ["k2", "k3", "k2"]

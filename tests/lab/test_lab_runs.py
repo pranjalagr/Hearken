@@ -352,7 +352,8 @@ def test_the_key_order_uses_the_first_working_key_and_moves_on_when_one_fails(mo
     full.add("G3")
     assert keys.choose() and keys.chosen() == {"gemini": "G3"}
     assert all("G" in line for line in said) and not any("AIza" in line for line in said)  # names only
-    assert set(load_order()) <= {"gemini", "sarvam", "groq"}  # the real file loads
+    order, rotate = load_order()  # the real file loads
+    assert set(order) <= {"gemini", "sarvam", "groq"} and rotate <= {"gemini"}
 
 
 async def test_before_a_rerun_the_batch_asks_for_the_next_key_and_stops_if_none_is_left(tmp_path, monkeypatch):
@@ -383,3 +384,38 @@ def test_sarvam_out_of_credit_is_the_labs_problem(tmp_path):
     diary.write_text(json.dumps({"kind": "error", "text": 'HTTP 402 {"error":{"message":"No credits available.",'
                                                           '"code":"insufficient_quota_error"}}'}) + "\n", encoding="utf-8")
     assert robot_hit_a_limit(diary) is not None
+
+
+def test_a_rotated_service_hands_the_robot_every_working_key_and_drops_failed_ones(monkeypatch):
+    # The owner's choice, 16 Nov 2026: Agent C's Gemini requests take turns over the keys.
+    import os
+
+    from common.env import GEMINI_KEY_CHOICE, GEMINI_POOL_CHOICE
+    from lab.runner.key_order import KeyOrder
+
+    monkeypatch.delenv(GEMINI_KEY_CHOICE, raising=False)
+    monkeypatch.delenv(GEMINI_POOL_CHOICE, raising=False)
+    full = {"G2"}
+
+    def gemini():
+        name = os.environ[GEMINI_KEY_CHOICE]
+        return f"{name}: 429" if name in full else None
+
+    keys = KeyOrder({"gemini": ["G1", "G2", "G3"]}, {"gemini": gemini}, say=lambda line: None, rotate={"gemini"})
+    assert keys.choose() == [] and os.environ[GEMINI_POOL_CHOICE] == "G1,G3" and os.environ[GEMINI_KEY_CHOICE] == "G1"
+    full.discard("G2")  # a failed key is not taken back in the same run
+    full.add("G1")
+    assert keys.choose() == [] and os.environ[GEMINI_POOL_CHOICE] == "G3"
+    full.add("G3")
+    assert keys.choose()  # none left: the run stops
+
+
+def test_the_client_ring_hands_out_each_key_in_turn():
+    from common.google import ClientRing
+
+    class Client:
+        def __init__(self, name):
+            self.aio = name
+
+    ring = ClientRing([Client("a"), Client("b")])
+    assert [ring.aio for _ in range(5)] == ["a", "b", "a", "b", "a"]

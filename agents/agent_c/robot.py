@@ -56,7 +56,7 @@ from agents.common.pipecat_diary import DiaryObserver
 from agents.common.pipecat_hangup import END_CALL_SCHEMA, HangUp
 from agents.common.pipecat_line import LineTransport
 from agents.common.tools import Tools
-from common.google import GOOGLE_MIN_TIMEOUT_S, google_client
+from common.google import GOOGLE_MIN_TIMEOUT_S, ClientRing, google_client
 from common.wire.protocol import PIECE_MS, SAMPLE_RATE, Cleared, End, Key, Played
 from common.wire.robot_line import CallerAudio, LineClosed, RobotLine
 from engine.contract.spoken import SpokenWords
@@ -71,8 +71,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 @dataclass(frozen=True)
 class Keys:
-    gemini: str
+    gemini: str  # the Talker's (Pipecat's Gemini service holds one key)
     sarvam: str
+    # Every working Gemini key when the lab rotates them (lab/key_order.yaml): the Thinker's
+    # and judge's requests take turns over all but the Talker's, so the Talker keeps its own
+    # 15 a minute. Empty: everything on `gemini`.
+    gemini_pool: tuple[str, ...] = ()
+
+    def back_office(self) -> list[str]:
+        """The keys the Thinker and judge take turns over."""
+        others = [key for key in self.gemini_pool if key != self.gemini]
+        return others or [self.gemini]
 
 
 def talker_tools() -> ToolsSchema:
@@ -204,13 +213,17 @@ class AgentC:
             return self._judge
         section = self._settings.section("guard")
         # Gemini's own minimum deadline; the judge's ~1 s limit is held by TimedJudge.
-        client = google_client(self._keys.gemini, max(float(section["judge_s"]), GOOGLE_MIN_TIMEOUT_S))
+        client = self._ring(max(float(section["judge_s"]), GOOGLE_MIN_TIMEOUT_S))
         ask = gemini_ask(client, section["judge_model"], JUDGE_PROMPT.read_text(encoding="utf-8"))
         return TimedJudge(ask, float(section["judge_s"]), lambda: cap.add(1), self._diary.error)
 
+    def _ring(self, timeout_s: float) -> ClientRing:
+        """One client per back-office key, taking turns request by request."""
+        return ClientRing([google_client(key, timeout_s) for key in self._keys.back_office()])
+
     def _gemini_thinker(self, tools: Sequence[ToolSpec]) -> ThinkerBrain:
         # Gemini's own minimum deadline; the ~8 s step limit is held by the Thinker loop (try_live).
-        client = google_client(self._keys.gemini, max(self._limits.step_s, GOOGLE_MIN_TIMEOUT_S))
+        client = self._ring(max(self._limits.step_s, GOOGLE_MIN_TIMEOUT_S))
         return GeminiThinker(client, self._settings.thinker["model"], self._settings.thinker_prompt, tools,
                              on_usage=self._thinker_usage)
 

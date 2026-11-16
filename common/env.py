@@ -63,6 +63,17 @@ def gemini_key() -> str:
     return require(gemini_key_name())
 
 
+# Every working Gemini key, by .env name, comma-separated: set by the lab when the key
+# order rotates Gemini (lab/key_order.yaml, the owner's choice of 16 Nov 2026).
+GEMINI_POOL_CHOICE = "HEARKEN_GEMINI_KEYS"
+
+
+def gemini_pool() -> list[str]:
+    """The keys to take turns over; just the chosen key when no pool is set."""
+    names = [name.strip() for name in os.environ.get(GEMINI_POOL_CHOICE, "").split(",") if name.strip()]
+    return [require(name) for name in names] or [gemini_key()]
+
+
 # The same for the Groq key (the pretend caller's brain and the judge): picked per run
 # by the user (15 Nov 2026), never switched by code.
 GROQ_KEY_CHOICE = "HEARKEN_GROQ_KEY"

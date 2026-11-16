@@ -28,6 +28,26 @@ import httpx
 GOOGLE_MIN_TIMEOUT_S = 10.0
 
 
+class ClientRing:
+    """Several Gemini clients, each on its own key, taking turns: every `.aio` use hands
+    out the next one. The owner's choice (16 Nov 2026): Agent C's Talker, Thinker and
+    judge sent 19 requests in 75 s on one key, over the free tier's 15 a minute, so the
+    Thinker's and judge's requests go round the owner's keys. Only the client changes per
+    request; the Thinker keeps its own history, so nothing is lost between keys."""
+
+    def __init__(self, clients: list[Any]) -> None:
+        if not clients:
+            raise ValueError("a client ring needs at least one client")
+        self._clients = clients
+        self._next = 0
+
+    @property
+    def aio(self) -> Any:
+        client = self._clients[self._next % len(self._clients)]
+        self._next += 1
+        return client.aio
+
+
 def google_client(key: str, timeout_s: float, http_client: httpx.Client | None = None) -> Any:
     """timeout_s is the caller's policy (a voice clip needs far less than a
     judge that thinks). http_client lets tests put a fake network under the

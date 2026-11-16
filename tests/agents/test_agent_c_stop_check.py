@@ -136,6 +136,11 @@ def test_with_the_model_the_callers_sound_never_interrupts_by_itself():
 
 
 def test_without_a_model_file_agent_c_says_so_and_falls_back_to_pipecats_own_stop():
+    import dataclasses
+
     sink = ListSink()
-    robot = AgentC(load_settings(), Keys("g", "s"), None, diary=Diary("c1", sink))
+    # A path that is never there: on the owner's laptop the real model file exists (16 Nov 2026).
+    settings = load_settings()
+    raw = {**settings.raw, "stop_check": {**settings.section("stop_check"), "model_path": "runs/no_such_dir/none.onnx"}}
+    robot = AgentC(dataclasses.replace(settings, raw=raw), Keys("g", "s"), None, diary=Diary("c1", sink))
     assert robot._stop_model is None and "no stop-or-keep model" in sink.records[0]["text"]

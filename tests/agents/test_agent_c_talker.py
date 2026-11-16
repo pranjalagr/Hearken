@@ -189,3 +189,33 @@ async def test_speech_watch_keeps_the_words_that_arrive_before_the_voice_starts(
     await push(BotStartedSpeakingFrame())
     await push(BotStoppedSpeakingFrame())
     assert ended == [(False, "Order 4512 par refund kar doon? Haan ya nahi?"), (False, "")]  # reported once
+
+
+async def test_speech_watch_counts_the_voices_words_only_as_the_output_plays_them():
+    # 16 Nov 2026, food_01: the question's text was seen while the line before it played,
+    # so its mark went out ~2 s before the question ended.
+    from pipecat.frames.frames import BotStartedSpeakingFrame, BotStoppedSpeakingFrame, TTSTextFrame
+    from pipecat.observers.base_observer import FramePushed
+    from pipecat.processors.frame_processor import FrameDirection
+
+    from agents.agent_c.talker.speech_watch import SpeechWatch
+
+    voice, output = object(), object()
+    ended: list[tuple[bool, str]] = []
+    watch = SpeechWatch(lambda: None, lambda cut, words: ended.append((cut, words)))
+    watch.output = output
+
+    async def push(frame, source):
+        await watch.on_push_frame(FramePushed(source=source, destination=None, frame=frame,
+                                              direction=FrameDirection.DOWNSTREAM, timestamp=0))
+
+    ek_second, question = TTSTextFrame("Ek second.", aggregated_by="sentence"), TTSTextFrame("Haan ya nahi?", aggregated_by="sentence")
+    await push(BotStartedSpeakingFrame(), output)
+    await push(ek_second, voice)
+    await push(question, voice)  # made by the voice, not played yet
+    await push(ek_second, output)
+    await push(BotStoppedSpeakingFrame(), output)
+    await push(BotStartedSpeakingFrame(), output)
+    await push(question, output)
+    await push(BotStoppedSpeakingFrame(), output)
+    assert ended == [(False, "Ek second."), (False, "Haan ya nahi?")]

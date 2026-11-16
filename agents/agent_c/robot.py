@@ -149,6 +149,7 @@ class AgentC:
 
     async def _main(self, line: RobotLine, box: CallBox, call: CallParts) -> None:
         transport = LineTransport(line)
+        call.speech.output = transport.output()  # the voice's words count as they play (the Guard's mark)
         cap = BrainCap(self._max_brain_requests, lambda n: self._cap_reached(line, box, n))
         allowed = thinker_tools(await self._tools.catalog())
         brain = CountedBrain(self._brain_maker(allowed), cap)

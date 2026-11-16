@@ -26,11 +26,19 @@ class SpeechWatch(BaseObserver):
         self.speaking = False
         self._cut = False
         self._words: list[str] = []  # what the voice said since it started, for the Guard's mark
+        # The output transport. Its text frames are counted only as it passes them on, which
+        # it does in step with their audio: seen earlier, a question's text arrived while the
+        # line before it was still playing, so the Guard's mark went out ~2 s before the
+        # question ended and an early "haan" could count (food_01, 16 Nov 2026). None: every
+        # text frame counts (tests without a transport).
+        self.output: object | None = None
 
     async def on_push_frame(self, data: FramePushed) -> None:
         frame = data.frame
         if not isinstance(frame, _WATCHED) or frame.id in self._seen:
             return
+        if isinstance(frame, TTSTextFrame) and self.output is not None and data.source is not self.output:
+            return  # not played yet: counted when the output passes it on
         self._seen.add(frame.id)
         if isinstance(frame, LLMFullResponseEndFrame):
             self._on_reply_written()

@@ -13,6 +13,8 @@ request follows the hang-up (run_llm=False).
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.frames.frames import EndWorkerFrame, FunctionCallResultProperties
 from pipecat.services.llm_service import FunctionCallParams, LLMService
@@ -30,14 +32,24 @@ END_CALL_SCHEMA = FunctionSchema(
 
 
 class HangUp:
-    def __init__(self, diary: Diary) -> None:
+    def __init__(self, diary: Diary, not_now: Callable[[], str | None] = lambda: None) -> None:
+        """`not_now` says why the call may not end yet, or None. Agent C's Talker talks while
+        the back office works, so it could say goodbye while a change is still saving."""
         self._diary = diary
+        self._not_now = not_now
         self.reason: str | None = None  # set once the brain hangs up
 
     def connect(self, llm: LLMService) -> None:
         llm.register_function(END_CALL, self._handle)
 
     async def _handle(self, params: FunctionCallParams) -> None:
+        refused = self._not_now()
+        if refused is not None:
+            self._diary.decision("hang up refused", reason=refused)
+            # No extra brain request: the brain hears the refusal with the next caller turn or note.
+            await params.result_callback({"status": "refused", "message": refused},
+                                         properties=FunctionCallResultProperties(run_llm=False))
+            return
         self.reason = str((params.arguments or {}).get("reason") or "done")
         self._diary.decision("hang up", reason=self.reason)
         await params.result_callback({"status": "ok"}, properties=FunctionCallResultProperties(run_llm=False))

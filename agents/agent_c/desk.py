@@ -50,6 +50,17 @@ class JobDesk:
         self.start_thinker(self.job, self)
         return STARTED
 
+    def why_not_end(self) -> str | None:
+        """Why the Talker may not hang up yet, or None. A goodbye while the back office
+        still works would drop a caller whose change is saving or whose answer isn't in."""
+        if self.job is None:
+            return None
+        if self.job.changes_running:
+            return "a change is still saving; wait for its note"
+        if self.job.state == OPEN:
+            return "the back office is still working on the caller's request; wait for its note"
+        return None
+
     # ---- the caller's side ------------------------------------------------------
 
     def caller_began(self) -> None:

@@ -52,6 +52,7 @@ from agents.common.call_box import CallBox, CallBoxSettings, CallResult
 from agents.common.diary import NO_DIARY, Diary
 from agents.common.pipecat_brain_cap import BRAIN_CAP, BrainCap
 from agents.common.pipecat_diary import DiaryObserver
+from agents.common.pipecat_hangup import END_CALL_SCHEMA, HangUp
 from agents.common.pipecat_line import LineTransport
 from agents.common.tools import Tools
 from common.google import google_client
@@ -74,8 +75,10 @@ class Keys:
 
 def talker_tools() -> ToolsSchema:
     """The Talker's whole tool list. No backend tool, no confirm, no Guard door: it can
-    only ask (decision 7). A test holds this to exactly one tool."""
-    return ToolsSchema(standard_tools=[ASK_THINKER_SCHEMA])
+    only ask (decision 7) and hang up after a goodbye (decision 13). Without end_call a
+    solved call ran on until the caller gave up: Agent A spent 50 brain requests in one
+    call that way (15 Nov 2026). A test holds this to exactly these two tools."""
+    return ToolsSchema(standard_tools=[ASK_THINKER_SCHEMA, END_CALL_SCHEMA])
 
 
 def thinker_tools(catalog: Sequence[ToolSpec]) -> list[ToolSpec]:
@@ -184,6 +187,9 @@ class AgentC:
         if call.hand_over.done:
             # Handed over and the line has played: say so on the wire (decision 13).
             await line.end(HANDED_OVER)
+        elif call.hang_up.reason is not None:
+            # The Talker said goodbye and hung up; the goodbye has played.
+            await line.end(call.hang_up.reason)
 
     async def _cap_reached(self, line: RobotLine, box: CallBox, requests: int) -> None:
         # As Agent A: the wire first, so the lab records why the call ended, then the box.
@@ -222,6 +228,7 @@ class AgentC:
                 model=s.talker["model"], system_instruction=s.talker_prompt, temperature=s.talker["temperature"],
                 thinking=GoogleLLMService.ThinkingConfig(thinking_level="minimal")))
         AskThinker(call.desk, self._diary).connect(talker)
+        call.hang_up.connect(talker)
         voice = SarvamTTSService(api_key=self._keys.sarvam, sample_rate=SAMPLE_RATE,
                                  settings=SarvamTTSService.Settings(model=s.voice["model"], voice=s.voice["speaker"],
                                                                     language=Language(s.voice["language"])))
@@ -282,6 +289,8 @@ class CallParts:
         self.speaker = Speaker(self.words, self.view, self.language, int(settings.talker["max_sentences"]))
         self.guard: Guard | None = None  # set once the call has begun, when the robot holds a door
         self.hand_over: HandOver | None = None  # set once the call has begun
+        # The Talker's end_call: refused while the back office still works on the job.
+        self.hang_up = HangUp(diary, not_now=lambda: self.desk.why_not_end())
         self.box: CallBox | None = None
         self._diary = diary
         self.switch = StopSwitch(name="stop-switch")

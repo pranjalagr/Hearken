@@ -48,8 +48,50 @@ def test_settings_load_with_the_same_ears_voice_and_greeting_as_agent_a():
     assert "ask_thinker" in c.talker_prompt and "[amount]" in c.talker_prompt  # role, then style guide
 
 
-def test_the_talker_holds_exactly_one_tool_ask_thinker():
-    assert [tool.name for tool in talker_tools().standard_tools] == [ASK_THINKER]
+def test_the_talker_holds_exactly_ask_thinker_and_end_call():
+    # end_call added 16 Nov 2026: without it a solved call ran on until the caller gave up.
+    from agents.common.pipecat_hangup import END_CALL
+
+    assert [tool.name for tool in talker_tools().standard_tools] == [ASK_THINKER, END_CALL]
+
+
+async def test_the_talker_may_not_hang_up_while_the_back_office_works():
+    from agents.common.pipecat_hangup import END_CALL
+
+    sink = ListSink()
+    call = CallParts(load_settings(), Diary("c1", sink), SpokenWords())
+
+    class Brain:
+        def __init__(self):
+            self.handlers, self.pushed = {}, []
+
+        def register_function(self, name, handler, **_):
+            self.handlers[name] = handler
+
+        async def push_frame(self, frame, *args):
+            self.pushed.append(frame)
+
+    class Params:
+        def __init__(self, brain):
+            self.function_name, self.arguments, self.llm, self.results = END_CALL, {"reason": "bye"}, brain, []
+
+        async def result_callback(self, result, *, properties=None):
+            self.results.append(result)
+
+    brain = Brain()
+    call.hang_up.connect(brain)
+    call.desk.start_thinker = lambda job, desk: None  # a Thinker that never answers
+    call.desk.open_job("cancel my order")  # the Thinker is still working
+    params = Params(brain)
+    await brain.handlers[END_CALL](params)
+    assert params.results[0]["status"] == "refused" and call.hang_up.reason is None and brain.pushed == []
+    call.desk.job.state = "answer given"
+    call.desk.job.change_sent()  # a confirm still saving
+    await brain.handlers[END_CALL](Params(brain))
+    assert call.hang_up.reason is None and brain.pushed == []
+    call.desk.job.change_answered()
+    await brain.handlers[END_CALL](Params(brain))
+    assert call.hang_up.reason == "bye" and len(brain.pushed) == 1  # the end frame, after the goodbye
 
 
 def test_the_pipeline_builds_without_a_network_and_in_agent_as_order():

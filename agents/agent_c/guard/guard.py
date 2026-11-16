@@ -89,6 +89,11 @@ class YesMoment:
     asking: str = ""  # the words of the newest ask
     mark: str = ""
     in_flight: bool = False  # queued for the voice, not yet played to the end
+    # What the voice has said since the newest ask was queued. The voice speaks a question
+    # in pieces ("... kar doon?" then "Haan ya nahi?"): checking each piece alone for the
+    # question's last words missed the end, so no mark was sent and every yes counted as
+    # early (food_02, 16 Nov 2026).
+    spoken: str = ""
     played_ms: int | None = None  # caller_ms when the newest ask finished playing
     ticket: str | None = None
     asks: int = 0
@@ -179,7 +184,9 @@ class Guard:
             # still queued for the voice): never fully heard, so asked again.
             moment.in_flight = False
             self._ask_soon()
-        elif _ends_with(spoken, moment.asking):
+            return
+        moment.spoken += " " + spoken
+        if _ends_with(moment.spoken, moment.asking):
             moment.in_flight = False
             self._box.start("guard:mark", self._send_mark(moment.mark))
 
@@ -370,7 +377,7 @@ class Guard:
         self._marks += 1
         moment.asks += 1
         moment.mark = f"yes-{self._marks}"
-        moment.in_flight, moment.played_ms = True, None
+        moment.in_flight, moment.played_ms, moment.spoken = True, None, ""
         await self._say(moment.asking)
 
 

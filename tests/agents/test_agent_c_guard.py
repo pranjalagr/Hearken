@@ -238,3 +238,21 @@ def test_no_ai_facing_part_can_reach_a_ticket(module):
 
     names = vars(importlib.import_module(module))
     assert "GuardDoor" not in names and "issue_ticket" not in str(names.get("__doc__", ""))
+
+
+async def test_a_question_the_voice_speaks_in_two_pieces_is_still_marked_once_its_end_plays(open_call):
+    # 16 Nov 2026, food_02: the voice said "... wapas kar doon?" and then "Haan ya nahi?" as
+    # two pieces; each was checked alone, no mark was ever sent, and a real yes was early.
+    kit = await open_call(FoodPack())
+    rig = Rig(kit, FakeJudge(YES))
+    await rig.prepare()
+    question = rig.said[-1]
+    first, last = question.rsplit("Haan ya nahi?", 1)[0], "Haan ya nahi?"
+    rig.guard.speech_ended(False, first)
+    assert rig.marks == []  # not the end yet
+    rig.guard.speech_ended(False, last)
+    await asyncio.sleep(0.01)
+    assert len(rig.marks) == 1
+    rig.guard.played(rig.marks[-1], 5000)
+    await rig.caller_says("haan cancel kar dijiye", started_ms=5100)
+    assert await rig.order_status() == "cancelled"

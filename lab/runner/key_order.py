@@ -56,6 +56,16 @@ class KeyOrder:
         chosen.update({service: ",".join(pool) for service, pool in self._pool.items()})
         return chosen
 
+    def drop(self, service: str) -> None:
+        """The service's current key failed in a call though its tiny check passes: a Groq
+        key with 199,307 of its 200,000 daily tokens used still answers a 1-token check
+        (16 Nov 2026), so the lab kept it and every rerun failed. Move past it."""
+        if service in self._at:
+            name = self.order[service][self._at[service]]
+            self._dropped.add(name)
+            self.say(f"key {name} failed in a call: dropped")
+            self._at[service] += 1
+
     def choose(self) -> list[str]:
         problems = self._choose_rotated()
         return problems + self._choose_single()

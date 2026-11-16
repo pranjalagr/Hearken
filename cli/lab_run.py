@@ -120,7 +120,9 @@ class KeyLog:
 def _next_keys(keys, maker):
     """Before a call is rerun: move to the next working key if the current one failed."""
 
-    async def check() -> str | None:
+    async def check(outcome) -> str | None:
+        if "Groq said 429" in outcome.why and ("per day" in outcome.why or "TPD" in outcome.why):
+            keys.drop("groq")  # full for the day, though it still answers the 1-token check
         before = keys.chosen().get("groq")
         problems = await asyncio.to_thread(keys.choose)  # tiny blocking requests: off the event loop
         if problems:

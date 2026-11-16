@@ -18,4 +18,6 @@ gemini: [GEMINI_API_KEY, GEMINI_API_KEY_3, GEMINI_API_KEY_4, GEMINI_API_KEY_5]
 # Remove a service from this list to go back to one key at a time.
 rotate: [gemini]
 sarvam: [SARVAM_API_KEY_4, SARVAM_API_KEY_5, SARVAM_API_KEY_6, SARVAM_API_KEY]
-groq: [GROQ_API_KEY_2, GROQ_API_KEY_3, GROQ_API_KEY_4, GROQ_API_KEY_5, GROQ_API_KEY]
+# GROQ_API_KEY_2 last: its 200K tokens a day were used up on 16 Nov 2026 though it
+# still passes the 1-token check.
+groq: [GROQ_API_KEY_3, GROQ_API_KEY_4, GROQ_API_KEY_5, GROQ_API_KEY, GROQ_API_KEY_2]

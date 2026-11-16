@@ -363,7 +363,7 @@ async def test_before_a_rerun_the_batch_asks_for_the_next_key_and_stops_if_none_
     monkeypatch.setattr(run_call_module.ScriptedCaller, "heard", broken_ear)
     asked = []
 
-    async def no_keys_left():
+    async def no_keys_left(outcome):
         asked.append(1)
         return "gemini: every key in lab/key_order.yaml failed"
 
@@ -419,3 +419,18 @@ def test_the_client_ring_hands_out_each_key_in_turn():
 
     ring = ClientRing([Client("a"), Client("b")])
     assert [ring.aio for _ in range(5)] == ["a", "b", "a", "b", "a"]
+
+
+def test_a_key_that_failed_in_a_call_is_dropped_though_its_tiny_check_passes(monkeypatch):
+    # 16 Nov 2026: a Groq key at 199,307 of 200,000 daily tokens answered the 1-token check,
+    # so the lab kept it and every rerun of the call failed on it.
+    import os
+
+    from common.env import GROQ_KEY_CHOICE
+    from lab.runner.key_order import KeyOrder
+
+    monkeypatch.delenv(GROQ_KEY_CHOICE, raising=False)
+    keys = KeyOrder({"groq": ["Q2", "Q3"]}, {"groq": lambda: None}, say=lambda line: None)
+    assert keys.choose() == [] and keys.chosen() == {"groq": "Q2"}
+    keys.drop("groq")
+    assert keys.choose() == [] and keys.chosen() == {"groq": "Q3"} and os.environ[GROQ_KEY_CHOICE] == "Q3"

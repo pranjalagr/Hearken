@@ -63,9 +63,10 @@ def plan_calls(tasks: list[Task], robots: list[RobotSpec], repeats: int, mode_fo
 
 
 async def run_batch(plans: list[CallPlan], pack: Pack, run_dir: Path, settings: LabSettings,
-                    before_rerun: Callable[[], Awaitable[str | None]] | None = None) -> BatchResult:
+                    before_rerun: Callable[[CallOutcome], Awaitable[str | None]] | None = None) -> BatchResult:
     """`before_rerun`: run after a lab problem, before the call is tried again (the next
-    key in lab/key_order.yaml); it returns why the batch must stop, or None."""
+    key in lab/key_order.yaml), given that call's outcome; it returns why the batch must
+    stop, or None."""
     started = time.perf_counter()
     result = BatchResult()
     board = BellBoard()
@@ -97,7 +98,7 @@ async def run_batch(plans: list[CallPlan], pack: Pack, run_dir: Path, settings: 
                     ended.append((outcome, plan))
                     return
                 if before_rerun is not None:
-                    stop = await before_rerun()
+                    stop = await before_rerun(outcome)
                     if stop is not None:
                         result.stopped = stop
                         broken.set()

@@ -1,20 +1,317 @@
 # Hearken
 
-A Hinglish voice agent that listens carefully: it tells "haan" (go on) from
-"ruko" (stop) and acts only on a real yes. (The code folder is still called
-`pakka`, the project's first working name.)
+A phone support agent that speaks Hinglish, and a test lab that measures it.
 
-What is here so far:
+A caller rings a food delivery helpline and says, in Hindi and English mixed: "Order 4521 cancel karna hai". The agent has to hear the order number right over a noisy phone line, look the order up, ask "cancel kar doon? Haan ya nahi?", and only then cancel it and send the money back. It must keep talking while it works, stop at once when the caller says "ruko" (wait), and never move money on a "haan" that wasn't a real yes.
+
+Hearken builds three agents for this job and measures them in the same lab, call for call, so the numbers show which design is safer and faster.
+
+(The code folder is still called `pakka`, the project's first working name.)
+
+## Results so far
+
+The same 15 practice calls, played by a pretend caller with real voices, background noise and planned interruptions. Every call is scored from the database (what really changed) and from the call recording.
+
+| | Agent A | Agent C |
+|---|---|---|
+| Design | one AI does everything | a Talker and a Thinker, as two graphs |
+| Calls counted | 15 of 15 | 13 of 15 |
+| Task success | 27% (4 of 15) | 31% (4 of 13) |
+| Harmful actions | 8 | 6 |
+| Calls with made-up numbers | 3 | 1 |
+| Reply delay, median | 3.44 s | **1.78 s** |
+| Reply delay, slowest 10% | 7.10 s | **4.06 s** |
+| Silence while a tool runs, median | 0.32 s | 0.17 s |
+| Stops on "ruko" | 1 of 1 | 1 of 1 |
+| Wrong stops on "haan" | 4 of 5 | 3 of 7 |
+
+What this shows:
+- **Agent C answers about twice as fast.** The Talker replies at once while the Thinker works in the background, instead of one AI doing both in turn.
+- **Agent C caused fewer harmful actions and made up fewer numbers.** In Agent C code, not the AI, writes every number the caller hears.
+- **Success is still low for both.** Agent C's run found real bugs (listed under "What the lab found"), and they are fixed. A clean rerun with the fixes is the next step.
+- Two of Agent C's 15 calls didn't run: the pretend caller's daily AI budget ran out.
+
+Agent A: run 7, 15 Nov 2026. Agent C: run 2, 17 Nov 2026 (some fixes landed during that run).
+
+## The three agents
+
+All three hear with the same speech-to-text, speak with the same voice, use the same backend tools and start with the same greeting. Only the design differs.
+
+| | How it works | What it tests |
+|---|---|---|
+| **Agent A** | One AI (Gemini Flash) hears the caller, calls the tools and speaks. A Pipecat pipeline. | The common way to build a voice agent. The baseline. |
+| **Agent B** | One speech-to-speech AI (Gemini Live). It hears sound and speaks sound directly. | Whether a single end-to-end model is enough. Built, not yet measured in the lab. |
+| **Agent C** | A Talker that talks and a Thinker that works, joined by a notebook. Both are state graphs (LangGraph). | Whether splitting talking from thinking makes the agent faster and safer. |
+
+## Agent C in detail
+
+### The idea
+
+A single AI that must both talk and think does one at a time: while it looks up an order, the caller hears silence; while it talks, nothing gets done. Agent C splits the two:
+
+```
+                 caller's words                     notes (found, needs a yes, done...)
+   Caller  <------------------->  Talker graph  <------------------------------>  Thinker graph
+                                  (one per call)          Notebook               (one per job)
+                                        |                                              |
+                                        | yes-question                                 | lookups and
+                                        v                                              v changes
+                                      Guard  ------------------ confirm ------------> Backend
+```
+
+- The **Talker** does all the talking: it greets, collects the order number, says what the Thinker found, and keeps the caller company while work goes on.
+- The **Thinker** does all the thinking: which request it is, what is missing, which tool to use, what a refusal means. It never talks to the caller. It writes notes, and the Talker says them.
+- The **notebook** is the only link between them: a list of notes with a bell that rings on each new one. Neither graph calls the other.
+- The **Guard** is plain code that owns the moment of "yes". Only it can confirm a change.
+
+### One call, end to end
+
+```mermaid
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    autonumber
+    participant C as Caller
+    box Agent C, one call box
+    participant T as Talker graph
+    participant N as Notebook
+    participant K as Thinker graph
+    participant G as Guard
+    end
+    participant B as Backend
+
+    Note over C,B: PHASE 1: Hear the order number
+    C->>T: Order 4521 cancel karna hai
+    T->>T: AI: real work, open a job
+    T->>C: Ji, ek second (no number said yet)
+    T->>T: AI finds the number words, code reads the digits
+    T->>N: note: order number 4521
+    N-->>K: bell
+    K->>K: AI checks 4521 against the caller's own words
+    K->>N: note: checked number 4521
+    N-->>T: bell
+    T->>C: 4521, dekh raha hoon
+
+    Note over C,B: PHASE 2: Look up, decide, prepare
+    K->>B: find_order(4521)
+    B-->>K: found, preparing, paid by card
+    K->>N: code copies the answer as it came
+    T->>C: Order 4521 mil gaya. Kitchen mein khana ban raha hai
+    K->>K: AI decides: cancel it
+    K->>B: prepare_cancel_order(4521)
+    B-->>K: token, refund of Rs 450
+    K->>N: note: needs a yes
+
+    Note over C,B: PHASE 3: The yes moment
+    N-->>T: bell
+    T->>G: start the yes moment
+    G->>C: Order 4521 cancel karke Rs 450 wapas kar doon? Haan ya nahi?
+    C-->>G: played receipt: the question was heard to the end
+    C->>G: Haan, kar do
+    G->>G: one-word AI judge says yes, code checks agree
+    G->>B: confirm(token, yes-ticket)
+    B-->>G: done
+    G->>N: note: result, done
+
+    Note over C,B: PHASE 4: Tell the result
+    N-->>T: bell
+    T->>C: Aapka order cancel ho gaya hai. Aur kuch madad kar sakta hoon?
+    C->>T: Nahi, bas
+    T->>N: the caller's words
+    K->>K: AI: no work left, the job closes
+    T->>C: Dhanyavaad, then code hangs up
+```
+
+### The Thinker graph
+
+One graph runs per job, from its first step until the job closes. In each step the AI may think and decide, but only among that step's own exits. Code checks the exit, presses every tool and copies every backend answer into the notebook.
+
+```mermaid
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    A[Job opens] --> B[Wait for the order number]
+    B -->|order-number note| C[AI checks the number against the caller's words]
+    C -->|unclear| B
+    C -->|checked| D[Code presses find_order]
+    D -->|not found: the Talker asks again| B
+    B -->|asked again, digit by digit, keypad: still not found| H[Hand over to a person]
+    D -->|found| E[AI decides the request]
+    E -->|a detail is missing| F[Note: question for the caller] --> E
+    E -->|answered from the order| J[Complete]
+    E -->|a change| P[Note: the plan] --> Q[Code presses the prepare tool]
+    E -->|no tool can do it| X[AI explains and offers a person]
+    Q -->|token| Y[Needs a yes: the Guard]
+    Q -->|wrong input| E
+    Q -->|refused| X
+    Y -->|done or not done| J
+    Y -->|refused at confirm| X
+    X -->|caller accepts| Z[Job closes]
+    X -->|caller still insists| H
+    J -->|anything else? more| E
+    J -->|nothing more| Z
+```
+
+### The Talker graph
+
+One graph runs per call. It waits at the step it reached between turns and never starts over.
+
+```mermaid
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    G[Greet] --> N[No job open]
+    N -->|AI: real work or a person| O[Open a job]
+    N -->|AI: caller is done| BYE[Goodbye, hang up]
+    O --> K[Collect the order number]
+    K -->|full number heard| J[Job open: talk while the Thinker works]
+    J -->|not-found note| K
+    J -->|needs-a-yes note| Y[Ask yes: the Guard]
+    Y -->|result| J
+    J -->|hand-over note| H[Hand over, hang up]
+    J -->|job closed, caller done| BYE
+```
+
+### What the AI decides and what code does
+
+The rule behind the design: **the AI understands, code acts.** A prompt rule can be skipped by the AI; a code rule can't. Every time the lab caught the AI breaking a prompt rule, the rule moved into code.
+
+| The AI decides | Code does |
+|---|---|
+| Does this turn need real work? Does it hold a number? | Opens the job, starts the Thinker graph |
+| Which number words the caller said | Turns them into digits and checks they were said in order |
+| Which request it is, which tool, what is missing | Presses every tool, with the checked order number |
+| What a refusal means, in plain words | Copies every backend answer into the notebook, as it came |
+| Is "haan, lekin..." a yes? (one word: yes, no, stop, unclear, other) | Takes the yes only after the question was heard to the end, then confirms |
+| What to say in a free reply | Fills every number and amount; replaces a line with a number nobody gave |
+
+Rules that live in code because the AI broke them as prompt rules:
+- A change the backend refused is never tried again with the same inputs.
+- A refund names the item; code fills its price from the order. The AI never writes an amount.
+- After one explanation, a caller who still insists is handed over once.
+- A change is never confirmed without a yes-ticket from the Guard.
+- The robot never speaks over the caller.
+
+### Why the backend can't be fooled
+
+An AI can't approve its own actions. Every risky action has two steps:
+
+```mermaid
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    autonumber
+    participant K as Thinker (AI side)
+    participant G as Guard (plain code)
+    participant B as Backend
+
+    K->>B: prepare_cancel_order(4521)
+    B-->>K: token (nothing has changed yet)
+    Note over G: the caller says a real yes, heard after the question ended
+    G->>B: ask for a yes-ticket for this token
+    B-->>G: yes-ticket
+    G->>B: confirm(token, yes-ticket)
+    B->>B: check: same action, not used, not cancelled, not too old
+    B-->>G: done, saved in one transaction
+```
+
+The yes-ticket door is only in plain code. It is never a tool, so no AI can reach it. If the caller says "ruko" while the confirm is on its way, the ticket is cancelled before the save.
+
+## The test lab
+
+The numbers above come from a lab built to be fair and hard to fool.
+
+```
+  Pretend caller                                         Robot (Agent A, B or C)
+  ears, brain (Groq), voice                 wire          |
+  noise, timed lines ("ruko"   <----------------------->  | tools (MCP)
+  while the robot asks)          8 kHz audio, WebSocket   v
+          |                                            Backend: a fresh database copy per call
+          v
+  Scorer: what changed in the database, harms, made-up numbers, delays, cut-offs
+```
+
+- **15 practice tasks** with hard moments: the rider picks the order up while the robot asks "cancel kar doon?", the caller says "haan haan" while listening, the backend loses a reply, the caller corrects a number. A separate set of exam tasks stays unseen until the final run.
+- **The pretend caller** has real voices (Smallest.ai), background noise (traffic, kitchen, crowd) and a director that plays lines at an exact moment of the call.
+- **The scorer** compares the database before and after each call, so it knows what really happened, not what the robot said.
+- **A health check** proves the lab itself before any run: planted mistakes must be caught, a perfect robot must pass every task, and no call may see another call's changes.
+
+## Numbers that back the design
+
+| What | Result |
+|---|---|
+| Automated tests | 1356 passing |
+| Lab health check | every light green: tasks, scorer, clock, no leaks, caller timing |
+| Interruptions the pretend caller lands at the exact moment | 5 of 5 |
+| Speech-to-text chosen by test (76 robot-voice clips) | Sarvam 68 right, Deepgram 58 |
+| Number finder: when it says a number, it is right | 98% (309 of 316 cases), usually in 0.27 s |
+| "haan" vs "ruko" model, on a voice it never heard | 0.91 (1 is perfect, 0.5 is guessing) |
+| LangGraph's own time per graph step | 0.3 ms |
+| 20 calls at once on one laptop | no freeze of the event loop over 100 ms |
+
+## What the lab found in Agent C (and what changed)
+
+Watching every call line by line found problems no unit test showed. Each one is fixed and has a test now.
+
+| Found in a call | Fix |
+|---|---|
+| A hand-over was saved without the order number | the checked number goes with every hand-over |
+| The robot spoke over the caller and cut off a real "yes" | every line waits until the caller finishes |
+| The AI said an old refund's amount as this refund's | code allows only the change's own amount |
+| Pre-made voice clips were not counted as the robot speaking | clips are sent exactly like live voice |
+| A noise word was read as "I want a person" | only a clear request counts |
+| The same refused cancel was tried again and again | code never presses a refused change again |
+| The robot hung up on a caller who still wanted something | "anything else?" after every answer |
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Voice pipeline | Pipecat |
+| Agent graphs | LangGraph |
+| AI (talking, thinking, the yes judge) | Gemini Flash-Lite |
+| Speech-to-text, voice, number finder | Sarvam (saaras v3, bulbul v4, sarvam-105b) |
+| "haan" vs "ruko" model | own model (ONNX), trained on machine voices and real Hindi phone calls |
+| Backend and tools | Python, SQLite, MCP |
+| Pretend caller | Groq (brain), Smallest.ai (voices) |
+| Tests | pytest, 1356 tests |
+
+## Roadmap
+
+- [x] Backend with two-step safe actions, breakdown switches and race tests
+- [x] Test lab: pretend caller, director, scorer, AI judge, health check
+- [x] Agent A (one AI)
+- [x] Agent C on two LangGraph graphs, with the Guard
+- [ ] Agent C clean rerun with every fix from run 2
+- [ ] Agent B in the lab
+- [ ] Agents A, B and C side by side, then the unseen exam tasks
+- [ ] A real phone line (Asterisk gateway)
+
+## Running locally
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+pytest                                                # the 1356 tests, no keys needed
+python -m cli.lab_run health --quick                  # check the lab before trusting it
+python -m cli.lab_run run --robots agent:c --caller chain   # real calls: needs keys in .env
+```
+
+API keys go in a `.env` file next to this README (it is never committed). The full command list is in the developer guide below.
+
+---
+
+# Developer guide
+
+What is here, by part:
 - **the backend** (Part 1): the pretend food business the robots talk to, with
   safe actions, breakdown switches and race tests;
 - **the wire**: the one WebSocket line every caller and robot speaks, plus
   audio helpers and a stopwatch;
 - **the call box**: everything one call runs, ended cleanly when the call ends;
-- **the test lab's first parts**: the bell board, the director (exact-moment
-  race lines and drops), the dummy robot, the caller's number words, and a web
-  phone to call any robot from the browser;
+- **the test lab**: the bell board, the director (exact-moment race lines and
+  drops), the dummy robot, the caller's number words, and a web phone to call
+  any robot from the browser;
 - **the pretend caller** (Part 3): real ears, brain and voice behind the director,
-  checked by code on every line, with its own report card.
+  checked by code on every line, with its own report card;
+- **the agents**: Agent A (`agents/agent_a`) and Agent C (`agents/agent_c`).
 
 The plan and every design decision are kept in a separate document, not in
 this repo.

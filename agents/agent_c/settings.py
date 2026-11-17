@@ -1,5 +1,6 @@
 """Agent C's settings: every number and service name lives in settings.yaml, with the
-decision behind it; prompts are text files next to the code that uses them."""
+decision behind it; prompts are text files next to the code that uses them (each graph
+step reads its own, talker/prompts/steps and thinker/prompts/steps)."""
 
 from __future__ import annotations
 
@@ -10,8 +11,6 @@ from typing import Any
 import yaml
 
 HERE = Path(__file__).resolve().parent
-TALKER_PROMPTS = HERE / "talker" / "prompts"
-THINKER_PROMPT = HERE / "thinker" / "prompts" / "thinker.md"
 
 
 @dataclass(frozen=True)
@@ -21,8 +20,6 @@ class AgentCSettings:
     thinker: dict[str, Any]
     ears: dict[str, Any]
     voice: dict[str, Any]
-    talker_prompt: str
-    thinker_prompt: str
     raw: dict[str, Any]  # the whole file, for the sections each part reads itself
 
     @property
@@ -35,13 +32,6 @@ class AgentCSettings:
         return dict(self.raw.get(name) or {})
 
 
-def talker_prompt(folder: Path = TALKER_PROMPTS) -> str:
-    """The Talker's role, then the style guide the week-1 checks were run with."""
-    return (folder / "role.md").read_text(encoding="utf-8").strip() + "\n\n" + (folder / "style.md").read_text(encoding="utf-8")
-
-
-def load_settings(path: Path = HERE / "settings.yaml", prompts: Path = TALKER_PROMPTS,
-                  thinker: Path = THINKER_PROMPT) -> AgentCSettings:
+def load_settings(path: Path = HERE / "settings.yaml") -> AgentCSettings:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return AgentCSettings(data["greeting"], data["talker"], data["thinker"], data["ears"], data["voice"],
-                          talker_prompt(prompts), thinker.read_text(encoding="utf-8"), data)
+    return AgentCSettings(data["greeting"], data["talker"], data["thinker"], data["ears"], data["voice"], data)

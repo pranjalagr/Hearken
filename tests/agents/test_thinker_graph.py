@@ -51,6 +51,7 @@ class BackendTools:
     def __init__(self, backend) -> None:
         self.backend = backend
         self.calls: list[str] = []
+        self.handed_orders: list[int | None] = []
 
     async def call(self, name: str, inputs: dict[str, Any]):
         self.calls.append(name)
@@ -105,8 +106,9 @@ async def run(kit, request: str, ai: ScriptedAI, caller: list, guard: list | Non
     tools = BackendTools(kit.backend)
     handed: list[str] = []
 
-    async def hand_over(reason: str) -> None:
+    async def hand_over(reason: str, order_no: int | None = None) -> None:
         handed.append(reason)
+        tools.handed_orders.append(order_no)  # which order the person takes over
 
     parts = ThinkerParts(notebook, tools, ai, hand_over, build_catalog(FoodPack().actions(), kit.settings), step_s=step_s)
     helpers = [asyncio.create_task(_caller(notebook, caller)),
@@ -285,3 +287,50 @@ async def test_an_answer_with_no_allowed_exit_twice_is_stuck(open_call):
     ai = ScriptedAI(check_number=[{"exit": "maybe"}, {"nothing": True}])
     with pytest.raises(ThinkerStuck):
         await run(kit, "Cancel", ai, [(None, ORDER_NUMBER, "4521")])
+
+
+async def test_a_refused_change_is_never_pressed_again_with_the_same_inputs(open_call):
+    # The owner's rule, 17 Nov 2026: whatever the AI decides, code never presses a refused
+    # change again; it explains, and if the caller still insists, hands over.
+    kit = await open_call(FoodPack())
+    cancel = {"exit": "prepare", "tool": "prepare_cancel_order", "inputs": {}}
+    ai = ScriptedAI(check_number=[ok("4512")], decide=[cancel, cancel], after_explain=[{"exit": "changed"}],
+                    explain=[{"exit": "note", "text": "Deliver ho chuka hai, cancel nahi ho sakta."}])
+    _, tools, handed = await run(kit, "Cancel karna hai", ai, [(None, ORDER_NUMBER, "4512"),
+                                                             (ANSWER, CALLER, "Phir bhi cancel karo")])
+    assert tools.calls == ["find_order", "prepare_cancel_order"]  # pressed once, never again
+    assert handed == ["the caller still insists on something this line can't do"]
+
+
+async def test_a_hand_over_carries_the_checked_order_number(open_call):
+    # 17 Nov 2026, run 2: hand-overs were saved with no order, and the lab scored the right
+    # ones in food_05 and food_06 as wrong changes.
+    kit = await open_call(FoodPack())
+    ai = ScriptedAI(check_number=[ok("4568")], after_explain=[{"exit": "person"}],
+                    decide=[{"exit": "cannot", "reason": "no rider numbers on this line"}],
+                    explain=[{"exit": "note", "text": "Rider ka number nahi de sakte. Person se connect karun?"}])
+    _, tools, handed = await run(kit, "Rider ka number do", ai, [(None, ORDER_NUMBER, "4568"), (ANSWER, CALLER, "Haan")])
+    assert handed == ["the caller asked for a person"] and tools.handed_orders == [4568]
+
+
+async def test_a_new_request_during_the_yes_question_is_taken_up_after_it(open_call):
+    # The user's choice, 17 Nov 2026 (food_10): "haan, aur rider ka number bhi chahiye" during
+    # the yes-question becomes a request of its own once the yes moment ends.
+    kit = await open_call(FoodPack())
+    ai = ScriptedAI(check_number=[ok("4568")], after_explain=[{"exit": "person"}],
+                    answer_other=[{"exit": "new_request", "text": "Ji, rider ka number bhi dekhta hoon, pehle refund.",
+                                   "request": "the rider's phone number"}],
+                    decide=[{"exit": "prepare", "tool": "prepare_refund_order",
+                             "inputs": {"item": "Veg Momos", "reason": "missing_item"}},
+                            {"exit": "cannot", "reason": "this line can't give the rider's number"}],
+                    explain=[{"exit": "note", "text": "Rider ka number nahi de sakte. Person se connect karun?"}])
+    # The caller's "connect me" comes after the refund's result (the answer during the question
+    # is an ANSWER note too, so waiting for one would reply too early).
+    notebook, tools, handed = await run(kit, "Momos nahi aaye", ai, [(None, ORDER_NUMBER, "4568"),
+                                                                    (RESULT, CALLER, "Haan, connect karo")],
+                                        [("other", "Haan, aur rider ka number bhi chahiye"), "yes"])
+    assert tools.calls == ["find_order", "prepare_refund_order", "confirm"]
+    assert (await kit.one("SELECT amount_paise FROM refunds WHERE order_no = 4568 AND at >= 0"))["amount_paise"] == 18000
+    second_decide = [facts for step, facts in ai.asked if step == "decide"][1]
+    assert second_decide["handle_now"] == "the rider's phone number"
+    assert handed == ["the caller asked for a person"] and tools.handed_orders == [4568]

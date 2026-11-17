@@ -110,7 +110,8 @@ class Backend:
     async def _act_now(self, tool: str, action: Action, raw: dict[str, Any]) -> ToolReply:
         inputs, problem = clean_inputs(action.inputs, raw)
         if problem:
-            return await self._refuse_alone(tool, raw, problem, action=action.name)
+            return await self._refuse_alone(tool, raw, problem.reason, action=action.name,
+                                            wrong_input=problem.wrong_input)
         switch = await self._peek_switch(action.name)
         if action.risky:
             # Plain mode has no confirm: the action call itself is the one that
@@ -143,7 +144,8 @@ class Backend:
     async def _prepare(self, tool: str, action: Action, raw: dict[str, Any]) -> ToolReply:
         inputs, problem = clean_inputs(action.inputs, raw)
         if problem:
-            return await self._refuse_alone(tool, raw, problem, action=action.name)
+            return await self._refuse_alone(tool, raw, problem.reason, action=action.name,
+                                            wrong_input=problem.wrong_input)
         key = request_key(action, inputs)
         # A prepare only checks and writes a token, nothing changes yet, so it
         # takes the lookup time even for a risky action.
@@ -195,7 +197,7 @@ class Backend:
             return await self._refuse_alone(CONFIRM, raw, TICKET_NEEDED)
         inputs, problem = clean_inputs(confirm_inputs(self._settings.ticket_check), raw)
         if problem:
-            return await self._refuse_alone(CONFIRM, raw, problem)
+            return await self._refuse_alone(CONFIRM, raw, problem.reason)
         token_id, ticket_id = inputs["token"], inputs.get("ticket")
 
         # A quick read-only look, only to learn which action this token is for,
@@ -307,15 +309,17 @@ class Backend:
         reason: str,
         action: str | None = None,
         outcome: str = REFUSED,
+        wrong_input: str = "",
     ) -> ToolReply:
         """Refuse a call that never reached a transaction of its own (bad input,
-        unknown tool, or a bug), still logging it and still moving the world."""
+        unknown tool, or a bug), still logging it and still moving the world. A bad
+        input's name goes in the data, as for a rule's refusal."""
         async with self._db.transaction() as tx:
             now = self._clock.now()
             await self._timeline.apply_due(tx, now)
             entry = LogEntry(at=now, tool=tool, action=action, inputs=inputs, outcome=outcome, reason=reason)
             await self._log.write(tx, entry)
-        return ToolReply(outcome, reason)
+        return ToolReply(outcome, reason, {"wrong_input": wrong_input} if wrong_input else {})
 
     async def _fail(self, tx: Tx, draft: LogEntry, switch: Switch) -> ToolReply:
         reason = "The service failed. Nothing was changed. You can try again."

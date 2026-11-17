@@ -131,25 +131,28 @@ class Action(ABC):
 
 def clean_inputs(
     specs: dict[str, Input], raw: dict[str, Any]
-) -> tuple[dict[str, Any], str | None]:
+) -> tuple[dict[str, Any], Check | None]:
     """Check what the AI sent against the schema.
 
-    Returns the cleaned inputs, or a problem the AI can fix and retry. A wrong
+    Returns the cleaned inputs, or a refusal the AI can fix and retry. A wrong
     input is refused here, before any rule runs, so rules can trust their inputs.
+    The refusal names the wrong input, as the rules' refusals do, so an agent's code
+    can send it back to be fixed (17 Nov 2026: a refund's reason "raita missing" was
+    refused untagged, and the agent explained it to the caller instead of fixing it).
     """
     unknown = sorted(set(raw) - set(specs))
     if unknown:
-        return {}, f"Unknown input: {', '.join(unknown)}."
+        return {}, Check.refuse(f"Unknown input: {', '.join(unknown)}.", wrong_input=unknown[0])
     cleaned: dict[str, Any] = {}
     for name, spec in specs.items():
         value = raw.get(name)
         if value is None or (isinstance(value, str) and not value.strip()):
             if spec.required:
-                return {}, f"Missing input: {name}."
+                return {}, Check.refuse(f"Missing input: {name}.", wrong_input=name)
             continue
         value, problem = _clean_value(name, spec, value)
         if problem:
-            return {}, problem
+            return {}, Check.refuse(problem, wrong_input=name)
         cleaned[name] = value
     return cleaned, None
 

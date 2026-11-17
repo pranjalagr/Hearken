@@ -1,80 +1,80 @@
-"""Agent C: the team robot (docs/agent_c_design.md). Ears -> Talker -> voice, with a
-Thinker and a Guard beside the pipeline.
+"""Agent C: the team robot, as two graphs (decided 17 Nov 2026). Ears -> the Talker graph ->
+voice, with the Thinker graph and the Guard beside the pipeline.
 
-It shares the lab's ears, voice, tools, greeting, call box, diary, hang-up and brain
-cap with Agent A, so a comparison measures the design, not the parts. What differs:
-- the Talker holds no backend tool: its one tool is ask_thinker (decision 7);
-- the caller's receipts ("played", "cleared") and keys are read, not dropped:
-  the Guard times a yes from them (decision 22).
+It shares the lab's ears, voice, tools, greeting, call box, diary, hang-up and brain cap
+with Agent A, so a comparison measures the design, not the parts. What differs:
+- No brain sits inside the pipeline. A finished caller turn goes to the Talker graph,
+  which decides what to say and says it through the voice (fixed lines, or its AI's
+  sentences as they stream).
+- When the Talker opens a job, the Thinker graph runs beside the pipeline, in the call
+  box, and the two meet only in the notebook.
+- The caller's receipts ("played", "cleared") and keys are read: the Guard times a yes from
+  them (decision 22), and a typed order number goes to the Talker (decision 27).
 """
 
 from __future__ import annotations
 
 import asyncio
-
-from collections.abc import Awaitable, Callable, Sequence
-from typing import Any
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+import httpx
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesAppendFrame, TTSSpeakFrame
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair, LLMUserAggregatorParams
-from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.sarvam.stt import SarvamRealtimeSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
-from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy, VADUserTurnStartStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
-from agents.agent_c.desk import JobDesk
-from agents.agent_c.guard.guard import DONE, Door, Guard, GuardSettings
+from agents.agent_c.call_job import CallJob
+from agents.agent_c.guard.guard import Door, Guard, GuardSettings
 from agents.agent_c.guard.judge import TimedJudge, YesJudge, first_answer, gemini_ask
 from agents.agent_c.guard.partial_words import PartialWords
-from agents.agent_c.hand_over import HANDED_OVER, HandOver
-from agents.agent_c.job import Job, Turns
-from agents.agent_c.notebook import ASKED, CALLER, REQUEST, RESULT, Note, Notebook
-from agents.agent_c.order_ladder import OrderLadder, caller_said
+from agents.agent_c.notebook import FAILED, Note, Notebook
 from agents.agent_c.settings import AgentCSettings
 from agents.agent_c.stop_check import OnnxStopModel, StopListener, StopModel
 from agents.agent_c.stop_switch import StopSwitch
-from agents.agent_c.talker.ask_thinker import ASK_THINKER_SCHEMA, AskThinker
-from agents.agent_c.talker.feed import NoteFeed
+from agents.agent_c.talker.graph import TALKER_GRAPH, TalkerParts, TalkerRunner
 from agents.agent_c.talker.language import EarsLanguage, StickyLanguage
-from agents.agent_c.talker.mouth import Mouth
-from agents.agent_c.talker.note_view import NoteView
-from agents.agent_c.talker.speaker import Speaker
+from agents.agent_c.talker.lines import ClipOut, Clips, clip_lines, clip_name, clips_by_words
+from agents.agent_c.talker.quiet import QuietSettings
+from agents.agent_c.talker.quiet_watch import CallView, QuietWatch
+from agents.agent_c.talker.voice_spelling import spell_for_voice
+from agents.agent_c.talker.number_finder import FindNumbers, sarvam_find
 from agents.agent_c.talker.speech_watch import SpeechWatch
-from agents.agent_c.thinker.brain import GeminiThinker, Step, ThinkerBrain
-from agents.agent_c.thinker.loop import Thinker, ThinkerLimits
+from agents.agent_c.talker.talker_ai import GeminiTalkerAI, TalkerAI
+from agents.agent_c.thinker.graph import THINKER_GRAPH, ThinkerParts, run_job
+from agents.agent_c.thinker.step_brain import GeminiStepBrain, StepBrain
 from agents.common.call_box import CallBox, CallBoxSettings, CallResult
 from agents.common.diary import NO_DIARY, Diary
 from agents.common.pipecat_brain_cap import BRAIN_CAP, BrainCap
 from agents.common.pipecat_diary import DiaryObserver
-from agents.common.pipecat_hangup import END_CALL_SCHEMA, HangUp
 from agents.common.pipecat_line import LineTransport
 from agents.common.tools import Tools
 from common.google import GOOGLE_MIN_TIMEOUT_S, ClientRing, google_client
+from common.sarvam import sarvam_client
 from common.wire.protocol import PIECE_MS, SAMPLE_RATE, Cleared, End, Key, Played
 from common.wire.robot_line import CallerAudio, LineClosed, RobotLine
 from engine.contract.spoken import SpokenWords
-from engine.service.replies import REFUSED, ToolReply
 from engine.service.tool_catalog import CONFIRM, ToolSpec
 
-BrainMaker = Callable[[Sequence[ToolSpec]], ThinkerBrain]
 WORDS = Path(__file__).resolve().parent / "talker" / "words.yaml"
 JUDGE_PROMPT = Path(__file__).resolve().parent / "guard" / "prompts" / "judge.md"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+HANDED_OVER = "handed_over"
 
 
 @dataclass(frozen=True)
 class Keys:
-    gemini: str  # the Talker's (Pipecat's Gemini service holds one key)
+    gemini: str  # the Talker's own key
     sarvam: str
     # Every working Gemini key when the lab rotates them (lab/key_order.yaml): the Thinker's
     # and judge's requests take turns over all but the Talker's, so the Talker keeps its own
@@ -87,14 +87,6 @@ class Keys:
         return others or [self.gemini]
 
 
-def talker_tools() -> ToolsSchema:
-    """The Talker's whole tool list. No backend tool, no confirm, no Guard door: it can
-    only ask (decision 7) and hang up after a goodbye (decision 13). Without end_call a
-    solved call ran on until the caller gave up: Agent A spent 50 brain requests in one
-    call that way (15 Nov 2026). A test holds this to exactly these two tools."""
-    return ToolsSchema(standard_tools=[ASK_THINKER_SCHEMA, END_CALL_SCHEMA])
-
-
 def thinker_tools(catalog: Sequence[ToolSpec]) -> list[ToolSpec]:
     """The backend's tools for this call's mode, less confirm: code presses confirm, the
     instant the Guard gives a ticket (decision 17). Agent C runs in safe mode, where
@@ -105,126 +97,133 @@ def thinker_tools(catalog: Sequence[ToolSpec]) -> list[ToolSpec]:
     return [spec for spec in catalog if spec.name != CONFIRM]
 
 
-class CountedBrain:
-    """Counts each Thinker request against the call's brain cap, as the lab counts
-    the Talker's (Talker, Thinker and judge together, decision 19)."""
+class CountedTalkerAI:
+    """Counts each Talker AI request against the call's brain cap (decision 19)."""
 
-    def __init__(self, brain: ThinkerBrain, cap: BrainCap) -> None:
-        self._brain = brain
-        self._cap = cap
+    def __init__(self, ai: TalkerAI, cap: BrainCap) -> None:
+        self._ai, self._cap = ai, cap
 
-    async def step(self, news, results) -> Step:
+    async def reply(self, step, facts, exits, speak):
         await self._cap.add(1)
-        return await self._brain.step(news, results)
+        return await self._ai.reply(step, facts, exits, speak)
+
+
+class CountedStepBrain:
+    """Counts each Thinker AI request against the call's brain cap (decision 19)."""
+
+    def __init__(self, brain: StepBrain, cap: BrainCap) -> None:
+        self._brain, self._cap = brain, cap
+
+    async def ask(self, step, facts):
+        await self._cap.add(1)
+        return await self._brain.ask(step, facts)
 
 
 class AgentC:
     def __init__(self, settings: AgentCSettings, keys: Keys, tools: Tools, *,
                  box_settings: CallBoxSettings = CallBoxSettings(), diary: Diary = NO_DIARY,
-                 max_brain_requests: int = 40, brain_maker: BrainMaker | None = None,
-                 words: SpokenWords | None = None, door: Door | None = None, judge: YesJudge | None = None,
-                 stop_model: StopModel | None = None) -> None:
+                 max_brain_requests: int = 40, words: SpokenWords | None = None, door: Door | None = None,
+                 judge: YesJudge | None = None, stop_model: StopModel | None = None,
+                 talker_ai: TalkerAI | None = None, thinker_ai: StepBrain | None = None,
+                 find_numbers: FindNumbers | None = None) -> None:
         self._settings = settings
         self._keys = keys
         self._tools = tools
         self._box_settings = box_settings
         self._diary = diary
         self._max_brain_requests = max_brain_requests  # the lab passes its own (lab/settings.yaml)
-        self._brain_maker = brain_maker or self._gemini_thinker
         self._words = words or SpokenWords()  # the call's pack's spoken words (cli/agent_c.py)
         # The Guard's private door, from cli/agent_c.py: plain code only, never a tool (decision 7).
         self._door = door
         self._judge = judge
+        # The AIs and the finder; tests give fakes, the real robot makes them per call.
+        self._talker_ai = talker_ai
+        self._thinker_ai = thinker_ai
+        self._find_numbers = find_numbers
         self._guard_settings = GuardSettings.from_settings(settings.section("guard"))
         self._stop_model = stop_model if stop_model is not None else load_stop_model(settings, diary)
-        self._limits = ThinkerLimits.from_settings(settings.section("thinker_limits"))
+        self._clips = load_clips(settings, self._words, diary)  # read once, never during a call
         self._heard_pieces = 0
         self.result: CallResult | None = None
 
     async def __call__(self, line: RobotLine) -> None:
-        call = CallParts(self._settings, self._diary, self._words, self._stop_model)
+        call = CallParts(self._settings, self._diary, self._words, self._stop_model, self._clips)
         box = CallBox(self._box_settings, on_crash=call.crashed)
         try:
             self.result = await box.run(lambda b: self._main(line, b, call))
         finally:
+            if call.finder_client is not None:
+                await call.finder_client.aclose()
             # The ears are paid by the minute of caller audio sent to them.
             self._diary.cost(self._settings.ears["model"], round(self._heard_pieces * PIECE_MS / 60000, 3), "minutes")
 
     async def _main(self, line: RobotLine, box: CallBox, call: CallParts) -> None:
+        """One call: build the pipeline, the Talker graph and the Guard, then run until the
+        Talker says goodbye or hands over (or the line or the box ends it)."""
         transport = LineTransport(line)
         call.speech.output = transport.output()  # the voice's words count as they play (the Guard's mark)
         cap = BrainCap(self._max_brain_requests, lambda n: self._cap_reached(line, box, n))
-        allowed = thinker_tools(await self._tools.catalog())
-        brain = CountedBrain(self._brain_maker(allowed), cap)
-        names = {spec.name for spec in allowed}
-
-        def start_thinker(job: Job, desk: JobDesk) -> None:
-            thinker = Thinker(job, call.notebook, brain, self._tools, names, desk, self._limits, self._diary,
-                              hand_over_tool=self._settings.raw["hand_over_tool"])
-            box.start("thinker", thinker.run(), crash_safe=True)
-
-        call.desk.start_thinker = start_thinker
+        menu = thinker_tools(await self._tools.catalog())
         task = PipelineTask(self.pipeline(transport, call),
                             params=PipelineParams(audio_in_sample_rate=SAMPLE_RATE, audio_out_sample_rate=SAMPLE_RATE,
                                                   enable_metrics=True, enable_usage_metrics=True),
                             observers=[DiaryObserver(self._diary), cap, EarsLanguage(call.language),
                                        call.speech, PartialWords(call.partial_words)])
-
-        async def tell_talker(text: str) -> None:
-            self._diary.decision("notes to talker", text=text)
-            await task.queue_frames([LLMMessagesAppendFrame([{"role": "user", "content": text}], run_llm=True)])
-
-        async def say(text: str) -> None:
-            """A line code wrote (the yes-question): straight to the voice, and into the
-            Talker's history, so it knows what the caller heard."""
-            call.speaker.heard(text)  # numbers the caller heard from the backend may be repeated
-            await task.queue_frames([TTSSpeakFrame(text)])
-
-        call.say = say  # the order ladder's fixed lines go the same way
-
-        async def say_and_end(text: str) -> None:
-            """The hand-over line, then the end. Code ends the call once the line has played
-            (or at the time limit): an end frame queued behind the line was dropped when
-            the caller spoke over it, and the call stayed open (food_05, 16 Nov 2026)."""
-            call.speaker.heard(text)
-            box.start("hand over end", self._end_after_line(task, line, box, call, text))
-
-        call.hand_over = HandOver(self._tools, self._settings.raw["hand_over_tool"], call.desk, say_and_end,
-                                  lambda: call.words.phrase("line", "hand_over", call.language.value), self._diary)
-        call.box = box
-        call.desk.on_hand_over = call.thinker_hand_over
-        if self._door is not None:
-            call.guard = Guard(self._door, self._tools, box, call.notebook, call.desk, self._yes_judge(cap), call.words,
-                               call.language, say, line.send_mark, self._guard_settings, self._diary,
-                               hand_over=call.hand_over.now)
-            call.desk.on_prepared = call.guard.prepared
-        call.start_feed(tell_talker, box)
+        self.wire(call, box, line, task, cap, menu)
         box.start("ears", self._listen(line, transport, box, call))
-        # Every robot opens the same way, with a fixed line (decision 13).
-        await task.queue_frames([TTSSpeakFrame(self._settings.greeting)])
+        box.start("talker", call.runner.run())  # not crash-safe: without the Talker the call can't go on
+        box.start("quiet", call.quiet.run())  # waiting lines and the silent caller (decisions 11, 13)
         await PipelineRunner(handle_sigint=False).run(task)
-        if call.hand_over.done:
-            pass  # the hand-over ends the call itself, once its line has played (_end_after_line)
-        elif call.hang_up.reason is not None:
-            # The Talker said goodbye and hung up; the goodbye has played.
-            await line.end(call.hang_up.reason)
 
-    async def _end_after_line(self, task: PipelineTask, line: RobotLine, box: CallBox, call: CallParts,
-                              text: str) -> None:
-        section = self._settings.section("hand_over_end")
-        wait_s, tries = float(section["wait_s"]), int(section["tries"])
-        deadline = asyncio.get_running_loop().time() + wait_s
-        for _ in range(tries):
-            played = call.await_spoken(text)
-            await task.queue_frames([TTSSpeakFrame(text)])
-            try:
-                if await asyncio.wait_for(played, max(0.0, deadline - asyncio.get_running_loop().time())):
-                    break  # heard to the end
-            except TimeoutError:
-                break
-        self._diary.decision("hang up", reason=HANDED_OVER)
-        await line.end(HANDED_OVER)
-        box.end(HANDED_OVER)
+
+    def wire(self, call: CallParts, box: CallBox, line: RobotLine, task: Any, cap: BrainCap,
+             menu: Sequence[ToolSpec]) -> None:
+        """Join one call's parts: the AIs (counted against the brain cap), the Thinker graph
+        started per job, the Talker graph's runner, and the Guard. Kept apart from the
+        pipeline, so tests can run a whole call through it without a network."""
+        call.box, call.line, call.task, call.tools = box, line, task, self._tools
+        talker_ai = CountedTalkerAI(self._talker_ai or self._gemini_talker(), cap)
+        thinker_ai = CountedStepBrain(self._thinker_ai or self._gemini_thinker(), cap)
+        find = self._find_numbers or call.real_finder(self._keys.sarvam, self._settings.section("number_finder"))
+
+        def start_thinker() -> None:
+            """The Talker opened a job: run its Thinker graph beside the pipeline. A crash
+            is caught by the box: a "failed" note, then the hand-over (decision 14)."""
+            limits = self._settings.section("thinker_limits")
+            parts = ThinkerParts(call.notebook, self._tools, thinker_ai, call.hand_over, menu,
+                                 version=lambda: call.job.version, step_s=float(limits["step_s"]),
+                                 retries=int(limits["step_retries"]), same_call_limit=int(limits["same_call_limit"]),
+                                 language=lambda: call.language.value,
+                                 on_step=lambda step, answer: self._diary.decision("thinker step", step=step,
+                                                                                   answer=answer))
+            seen = call.notebook.newest  # this job's notes start after the job note
+            call.thinker = parts
+
+            async def thinker() -> None:
+                try:
+                    caller_done = await run_job(THINKER_GRAPH, parts, f"{id(call)}-job-{seen}", seen)
+                finally:
+                    call.thinker = None
+                    call.quiet.drop_plan()  # a plan not said by now is old
+                call.runner.job_closed(caller_done)
+
+            box.start("thinker", thinker(), crash_safe=True)
+
+        call.quiet = call.make_quiet_watch()
+        ladder = self._settings.section("order_ladder")
+        talker_parts = TalkerParts(
+            call.notebook, call, call.words, talker_ai, find, call.guard_port, start_thinker, call.end_call,
+            self._settings.greeting, language=lambda: call.language.value, version=lambda: call.job.version,
+            new_turn=call.job.new_turn, number_length=int(self._settings.section("number_finder")["number_length"]),
+            keypad_s=float(ladder["keypad_wait_s"]), max_sentences=int(self._settings.talker["max_sentences"]),
+            reply_s=float(self._settings.section("talker_graph")["reply_s"]), hold_plan=call.quiet.hold_plan,
+            on_error=self._diary.error,
+            on_step=lambda step, details: self._diary.decision("talker step", step=step, **details))
+        call.runner = TalkerRunner(TALKER_GRAPH, talker_parts, f"call-{id(call)}")
+        if self._door is not None:
+            call.guard = Guard(self._door, self._tools, box, call.notebook, call.job, self._yes_judge(cap), call.words,
+                               call.language, call.say_question, line.send_mark, self._guard_settings, self._diary,
+                               hand_over=call.hand_over)
 
     async def _cap_reached(self, line: RobotLine, box: CallBox, requests: int) -> None:
         # As Agent A: the wire first, so the lab records why the call ended, then the box.
@@ -248,35 +247,29 @@ class AgentC:
         """One client per back-office key, taking turns request by request."""
         return ClientRing([google_client(key, timeout_s) for key in self._keys.back_office()])
 
-    def _gemini_thinker(self, tools: Sequence[ToolSpec]) -> ThinkerBrain:
-        # Gemini's own minimum deadline; the ~8 s step limit is held by the Thinker loop (try_live).
-        client = self._ring(max(self._limits.step_s, GOOGLE_MIN_TIMEOUT_S))
-        return GeminiThinker(client, self._settings.thinker["model"], self._settings.thinker_prompt, tools,
-                             on_usage=self._thinker_usage)
+    def _gemini_talker(self) -> TalkerAI:
+        """The Talker's AI on its own key (Gemini's minimum deadline; the graph holds its own limit)."""
+        reply_s = float(self._settings.section("talker_graph")["reply_s"])
+        return GeminiTalkerAI(google_client(self._keys.gemini, max(reply_s, GOOGLE_MIN_TIMEOUT_S)),
+                              self._settings.talker["model"])
 
-    def _thinker_usage(self, prompt_tokens: int, answer_tokens: int) -> None:
-        model = self._settings.thinker["model"]
-        self._diary.cost(model, prompt_tokens, "input tokens", by="thinker")
-        self._diary.cost(model, answer_tokens, "output tokens", by="thinker")
+    def _gemini_thinker(self) -> StepBrain:
+        """The Thinker's AI, taking turns over the back-office keys."""
+        step_s = float(self._settings.section("thinker_limits")["step_s"])
+        return GeminiStepBrain(self._ring(max(step_s, GOOGLE_MIN_TIMEOUT_S)), self._settings.thinker["model"])
 
     def pipeline(self, transport: LineTransport, call: CallParts) -> Pipeline:
+        """Ears -> turn detection -> voice. No brain in between: a finished turn goes to the
+        Talker graph (call.caller_finished), which speaks through call.say."""
         s = self._settings
         ears = SarvamRealtimeSTTService(
             api_key=self._keys.sarvam, sample_rate=SAMPLE_RATE,
             settings=SarvamRealtimeSTTService.Settings(model=s.ears["model"], language=Language(s.ears["language"]),
                                                        mode=s.ears["mode"], stream_type=s.ears["stream_type"],
                                                        silence_duration_ms=s.ears["silence_ms"]))
-        talker = GoogleLLMService(
-            api_key=self._keys.gemini,
-            settings=GoogleLLMService.Settings(
-                model=s.talker["model"], system_instruction=s.talker_prompt, temperature=s.talker["temperature"],
-                thinking=GoogleLLMService.ThinkingConfig(thinking_level="minimal")))
-        AskThinker(call.desk, self._diary).connect(talker)
-        call.hang_up.connect(talker)
         voice = SarvamTTSService(api_key=self._keys.sarvam, sample_rate=SAMPLE_RATE,
                                  settings=SarvamTTSService.Settings(model=s.voice["model"], voice=s.voice["speaker"],
                                                                     language=Language(s.voice["language"])))
-        context = LLMContext(tools=talker_tools())
         user_params = LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer())
         if call.stop_listener is not None:
             # Decision 26: the caller's sound never stops the voice by itself; only the
@@ -284,7 +277,8 @@ class AgentC:
             user_params = LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer(), user_turn_strategies=UserTurnStrategies(
                 start=[VADUserTurnStartStrategy(enable_interruptions=False),
                        TranscriptionUserTurnStartStrategy(enable_interruptions=False)]))
-        turns = LLMContextAggregatorPair(context, user_params=user_params)
+        # Pipecat's turn collector, kept only to know when a caller turn begins and ends.
+        turns = LLMContextAggregatorPair(LLMContext(), user_params=user_params)
 
         @turns.user().event_handler("on_user_turn_started")
         async def began(aggregator, strategy) -> None:
@@ -294,9 +288,8 @@ class AgentC:
         async def finished(aggregator, strategy, message) -> None:
             call.caller_finished(message.content or "")
 
-        mouth = Mouth(call.speaker, context, self._diary)
-        return Pipeline([transport.input(), call.switch, ears, turns.user(), talker, mouth, voice, transport.output(),
-                         turns.assistant()])
+        # The clip player sits after the voice: the ears must never hear the robot's own clip.
+        return Pipeline([transport.input(), call.switch, ears, turns.user(), voice, call.clip_out, transport.output()])
 
     async def _listen(self, line: RobotLine, transport: LineTransport, box: CallBox, call: CallParts) -> None:
         async for event in line.events():
@@ -316,38 +309,58 @@ class AgentC:
                 return
 
 
+class GuardPort:
+    """What the Talker graph sees of the Guard. The Guard reads caller turns and keys itself,
+    straight from the call (CallParts), with their timing; the Talker only hands it the
+    prepared change."""
+
+    def __init__(self, call: CallParts) -> None:
+        self._call = call
+
+    async def prepared(self, note: Note) -> None:
+        if self._call.guard is not None:
+            await self._call.guard.prepared(note)
+
+    async def answer(self, words: str, start_ms: int | None) -> None:
+        pass  # the Guard already has it (CallParts.caller_finished)
+
+    def key(self, digit: str, caller_ms: int) -> None:
+        pass  # the Guard already has it (CallParts.receipt)
+
+
 class CallParts:
-    """One call's own pieces: its notebook, turns, job desk and note feed."""
+    """One call's own pieces: its notebook, job version, words, language, Guard, voice and
+    the Talker graph's runner. Also the Talker graph's voice (say)."""
 
     def __init__(self, settings: AgentCSettings, diary: Diary, pack_words: SpokenWords,
-                 stop_model: StopModel | None = None) -> None:
+                 stop_model: StopModel | None = None, clips: dict[str, bytes] | None = None) -> None:
+        self._settings = settings
+        self._diary = diary
         self.notebook = Notebook(int(settings.section("notebook")["max_notes"]))
-        self.turns = Turns()
-        self.desk = JobDesk(self.notebook, self.turns, self._no_thinker, diary)
-        self._feed_wait_s = float(settings.section("feed")["wait_s"])
-        self.feed: NoteFeed | None = None
-        # The pack's words (statuses, money) and Agent C's own (safe line, results), as one.
+        self.job = CallJob()
+        # The pack's words (statuses, money) and Agent C's own (lines, results), as one.
         self.words = SpokenWords({**pack_words.groups, **SpokenWords.from_yaml(WORDS).groups})
         self.language = StickyLanguage(int(settings.section("language")["min_words"]))
-        self.view = NoteView(self.words)
-        self.speaker = Speaker(self.words, self.view, self.language, int(settings.talker["max_sentences"]))
         self.guard: Guard | None = None  # set once the call has begun, when the robot holds a door
-        self.hand_over: HandOver | None = None  # set once the call has begun
-        # The Talker's end_call: refused while the back office still works on the job.
-        self.hang_up = HangUp(diary, not_now=lambda: self.desk.why_not_end())
-        self._spoken_waiters: list[tuple[str, asyncio.Future]] = []  # lines waiting to be heard to the end
-        # Decision 27, run by code: ask again, digit by digit, then the keypad (order_ladder.py).
-        ladder = settings.section("order_ladder")
-        self.ladder = OrderLadder(int(ladder["digits"]))
-        self._keypad_wait_s = float(ladder["keypad_wait_s"])
-        self._name_match = int(ladder["name_match"])
-        self.say: Callable[[str], Awaitable[None]] | None = None  # set once the call has begun
-        self.desk.on_missed = self.order_missed
-        self.desk.name_heard = self.name_heard
+        self.guard_port = GuardPort(self)
+        self.runner: TalkerRunner | None = None
         self.box: CallBox | None = None
-        self._diary = diary
+        self.line: RobotLine | None = None
+        self.task: PipelineTask | None = None
+        self.finder_client: httpx.AsyncClient | None = None
+        self.tools: Tools | None = None  # the backend's tools, for the hand-over
+        self._spoken_waiters: list[tuple[str, asyncio.Future]] = []  # lines waiting to be heard to the end
+        self._handed_over = False
+        self._last_line = ""
+        self._last_said_at = -1e9  # when the last line was sent to the voice (the loop's clock)
+        self._speech_ended_at = -1e9  # when the voice last stopped (the loop's clock)
+        self.clips = clips or {}  # each fixed line's pre-made clip, by its words
+        self.clip_out = ClipOut(name="clip-out")
+        self.caller_talking = False
+        self.thinker: ThinkerParts | None = None  # the running job's Thinker graph parts
+        self.quiet: QuietWatch | None = None  # set once the call has begun
         self.switch = StopSwitch(name="stop-switch")
-        self.speech = SpeechWatch(self.feed_replied, self.speech_ended)
+        self.speech = SpeechWatch(lambda: None, self.speech_ended)
         self.stop_listener: StopListener | None = None
         if stop_model is not None:
             stop = settings.section("stop_check")
@@ -355,19 +368,156 @@ class CallParts:
                                               self.stop_talking, lambda ms: diary.error(f"stop check took {ms:.0f} ms"))
         self.caller_ms = 0  # the newest caller piece heard, on the caller's clock (the wire's caller_ms)
 
-    def crashed(self, task: str, error: BaseException) -> None:
-        """A crash-safe task (the Thinker) crashed: its job ends with a "failed" note,
-        and the caller is handed over, once."""
-        self.desk.on_crash(task, error)
-        if self.hand_over is not None and self.box is not None:
-            self.box.start("hand over", self.hand_over.now("the back office stopped working"))
+    # ---- the voice -----------------------------------------------------------------------
 
-    @staticmethod
-    def _no_thinker(job: Job, desk: JobDesk) -> None:
-        raise RuntimeError("the Thinker is started only once the call has begun")
+    async def say(self, text: str, again_if_cut: bool = False) -> None:
+        """The Talker graph's voice: one line to the caller, written in the diary as said
+        (the scorer reads it). Spelled for the voice first ("main" -> "mai", 2 Nov 2026),
+        and played from its pre-made clip when it has one. A line that must be heard is
+        said once more if cut."""
+        spoken = spell_for_voice(text, self.language.value)
+        # Decision 8: the robot never speaks over the caller; a line waits until they finish
+        # (at most question_wait_s). Missed in the step 5 rewrite: run 2 (17 Nov 2026) cut the
+        # caller off 23.6 times per 100 turns, and a cut "yes" in food_11 didn't count.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + float(self._settings.section("speed")["question_wait_s"])
+        while self.caller_talking and loop.time() < deadline:
+            await asyncio.sleep(0.05)
+        await self.say_plain(spoken, said=text)
+        if again_if_cut and self.box is not None:
+            self.box.start("say again if cut", self._again_if_cut(spoken))
+
+    async def say_plain(self, text: str, said: str | None = None, clip: bool = True) -> None:
+        """Straight to the voice as written: the clip if there is one, else the live voice.
+        The Guard's yes-question comes this way unspelled, as before: its mark compares the
+        question's last words with what the voice said."""
+        self._diary.said(said or text, filled=text)
+        self._last_line = text
+        self._last_said_at = asyncio.get_running_loop().time()
+        sound = self.clips.get(text) if clip else None
+        if sound is not None:
+            await self.clip_out.play(sound, text)
+        elif self.task is not None:
+            await self.task.queue_frames([TTSSpeakFrame(text)])
+
+    async def say_question(self, text: str) -> None:
+        """The Guard's yes-question, as its own turn: it waits until the robot is quiet
+        (nothing playing, and the last line sent long enough ago to have started), at most
+        question_wait_s, then speaks. 17 Nov 2026, food_07: the question queued right behind
+        the Talker's reply or a waiting line and played as one long turn, so the caller
+        couldn't hear it as a question of its own (and the lab's "ruko while asking" never
+        found it)."""
+        speed = self._settings.section("speed")
+        grace_s, most_s = float(speed["reply_grace_s"]), float(speed["question_wait_s"])
+        gap_s = float(speed["question_gap_s"])
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + most_s
+
+        def busy() -> bool:
+            now = loop.time()
+            # Still playing, a line just sent that hasn't started, or too soon after the last
+            # line ended: a short pause first, so the question is heard as a new question.
+            return (self.speech.speaking or now - self._last_said_at < grace_s
+                    or now - self._speech_ended_at < gap_s)
+
+        while loop.time() < deadline and busy():
+            await asyncio.sleep(0.05)
+        # Always the live voice, never a clip: the Guard's mark needs to see the question's
+        # words play. 17 Nov 2026, food_08: "Haan ya nahi?" played from its clip, no mark
+        # was sent, every later "haan" counted as early, and the call ran out of requests.
+        await self.say_plain(text, clip=False)
+
+    def make_quiet_watch(self) -> QuietWatch:
+        """The waiting lines and the silent caller, reading this call (decisions 11, 13)."""
+        speed = self._settings.section("speed")
+        grace_s = float(speed["reply_grace_s"])
+        loop = asyncio.get_running_loop()
+        view = CallView(
+            # A line just sent may take ~1 s to start: it counts as speaking meanwhile.
+            robot_speaking=lambda: self.speech.speaking or loop.time() - self._last_said_at < grace_s,
+            caller_speaking=lambda: self.caller_talking,
+            # The Thinker is running a step and the job is past collecting the number: its
+            # quick "a person?" check on each turn while collecting is not work the caller
+            # waits on (17 Nov 2026, food_02: a waiting line played while collecting).
+            working=lambda: (self.thinker is not None and not self.thinker.waiting_for
+                             and self.runner is not None and self.runner.mode == "wait_job"),
+            saving=lambda: self.job.changes_running > 0,
+            guard_asking=lambda: self.guard is not None and self.guard.asking)
+        settings = QuietSettings.from_settings(self._settings.section("waiting_lines"),
+                                               self._settings.section("silent_caller"))
+
+        async def say_line(group: str, value: str) -> None:
+            await self.say(self.words.phrase(group, value, self.language.value))
+
+        return QuietWatch(view, settings, sorted(self.words.values("waiting")), say_line, self.say, self.end_call,
+                          float(speed["tick_s"]))
+
+    async def _again_if_cut(self, text: str) -> None:
+        wait_s = float(self._settings.section("hand_over_end")["wait_s"])
+        try:
+            heard = await asyncio.wait_for(self.await_spoken(text), wait_s)
+        except TimeoutError:
+            return
+        if not heard:
+            self._diary.decision("said again", text=text, why="the caller cut it off")
+            await self.say_plain(text)
+
+    async def end_call(self, reason: str) -> None:
+        """Hang up once the last line (goodbye or the hand-over line) has played, ended by
+        code, not by a queued end frame (food_05, 16 Nov 2026: a queued end was dropped when
+        the caller spoke over it). A cut-off line is said again, up to `tries` in all, and
+        the call ends at the time limit regardless."""
+        section = self._settings.section("hand_over_end")
+        wait_s, tries = float(section["wait_s"]), int(section["tries"])
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + wait_s
+        text = self._last_line
+        for attempt in range(tries if text else 0):
+            if attempt:
+                await self.say_plain(text)  # cut off: once more
+            try:
+                if await asyncio.wait_for(self.await_spoken(text), max(0.0, deadline - loop.time())):
+                    break  # heard to the end
+            except TimeoutError:
+                break
+        self._diary.decision("hang up", reason=reason)
+        if self.line is not None:
+            await self.line.end(reason)
+        if self.box is not None:
+            self.box.end(reason)
+
+    def real_finder(self, sarvam_key: str, section: dict[str, Any]) -> FindNumbers:
+        """The number finder on Sarvam, one client per call (closed with it)."""
+        self.finder_client = sarvam_client(sarvam_key, float(section["try_s"]))
+        return sarvam_find(self.finder_client, str(section["model"]))
+
+    # ---- hand-over and crashes -------------------------------------------------------------
+
+    async def hand_over(self, reason: str, order_no: Any = None) -> None:
+        """Press the hand-over tool once, then the Talker says its line and ends the call
+        (decision 13). Used by the Thinker, the Guard giving up, and a crash."""
+        if self._handed_over:
+            return
+        self._handed_over = True
+        self._diary.decision("hand over", reason=reason)
+        if self.runner is not None:
+            self.runner.hand_over(reason)
+        inputs = {"reason": reason, **({"order_no": order_no} if order_no else {})}
+        if self.tools is not None:
+            await self.tools.call(str(self._settings.raw["hand_over_tool"]), inputs)
+
+    def crashed(self, task: str, error: BaseException) -> None:
+        """A crash-safe task (the Thinker) crashed: a "failed" note (the Talker apologises),
+        then the hand-over, once (decision 14)."""
+        self._diary.error(f"{task} crashed: {error!r}")
+        self.notebook.add(FAILED, f"{task} stopped working", self.job.version, {"error": repr(error)[:200]})
+        if self.box is not None:
+            self.box.start("hand over", self.hand_over("the back office stopped working"))
+
+    # ---- what the call reports -------------------------------------------------------------
 
     def caller_began(self) -> None:
-        self.desk.caller_began()
+        self.caller_talking = True
         if self.guard is not None:
             self.guard.turn_began(self.caller_ms)
 
@@ -376,119 +526,45 @@ class CallParts:
             await self.stop_listener.heard(piece, self.speech.speaking)
 
     async def stop_talking(self, chance: float) -> None:
-        """The stop-or-keep model said stop: stop the voice, make what was being said
-        about old news (a new version), and stop any ticket being confirmed."""
+        """The stop-or-keep model said stop: stop the voice, make what was being said old
+        news (a new version), and stop any ticket being confirmed."""
         self._diary.decision("stop talking", chance=round(chance, 3))
         await self.switch.stop_voice()
-        self.desk.robot_stopped()
+        self.job.new_turn()
         if self.guard is not None:
             self.guard.stop_ticket("the stop-or-keep model said stop")
 
     def caller_finished(self, words: str) -> None:
+        """A finished caller turn: to the Guard (it answers a yes-question with its own
+        timing) and to the Talker graph."""
+        self.caller_talking = False
         if self.stop_listener is not None:
             self.stop_listener.turn_finished()
         self.language.turn_finished(words)
-        self.speaker.heard(words)
-        self.desk.caller_finished(words)
         if self.guard is not None:
             self.guard.turn_finished(words)
+        if self.runner is not None and words.strip():
+            self.runner.turn(words)
 
     def partial_words(self, words: str) -> None:
         if self.guard is not None:
             self.guard.partial(words)
 
     def receipt(self, event: Played | Cleared | Key) -> None:
-        """The caller's receipts and keys, for the Guard's timing (decision 22). A key goes
-        to the order ladder while it waits for a typed order number (decision 27)."""
-        if isinstance(event, Key) and self.ladder.waiting_keys and (self.guard is None or not self.guard.asking):
-            number = self.ladder.key(event.digit)
-            if number is not None:
-                self._diary.decision("order number typed", number=number)
-                self.desk.typed_number(number)
+        """The caller's receipts and keys. A key during the yes moment is the Guard's
+        ("1 for yes"); any other key goes to the Talker (a typed order number)."""
+        if isinstance(event, Key):
+            if self.guard is not None and self.guard.asking:
+                self.guard.key(event.digit, event.caller_ms)
+            elif self.runner is not None:
+                self.runner.key(event.digit, event.caller_ms)
             return
         if self.guard is None:
             return
         if isinstance(event, Played):
             self.guard.played(event.name, event.caller_ms)
-        elif isinstance(event, Cleared):
-            self.guard.cleared(event.dropped_marks)
         else:
-            self.guard.key(event.digit, event.caller_ms)
-
-    def name_heard(self, name: str) -> bool:
-        """The name check: the caller said this name somewhere in the call (their turns, and
-        the requests the Talker passed on in their words)."""
-        requests = " ".join(note.text for note in self.notebook.notes if note.kind == REQUEST)
-        return caller_said(name, " ".join(self.desk.caller_words) + " " + requests, self._name_match)
-
-    async def order_missed(self, problem: str) -> bool:
-        """The caller's order wasn't identified: code says the next fixed line itself, so
-        the Thinker can't ask for the wrong thing (food_09, 16 Nov 2026: a wrong number,
-        and it asked for the name three times). False once the steps are used up."""
-        step = self.ladder.miss(problem)
-        self._diary.decision("order ladder", problem=problem, step=step)
-        if step is None or self.say is None:
-            return False
-        line = self.words.phrase("ladder", step, self.language.value)
-        job = self.desk.job
-        self.notebook.add(ASKED, self.words.phrase("ladder", step, "english"), job.version if job else 0, {"step": step})
-        await self.say(line)
-        if self.ladder.waiting_keys and self.box is not None:
-            self.box.start("keypad wait", self._keypad_timeout())
-        return True
-
-    async def _keypad_timeout(self) -> None:
-        await asyncio.sleep(self._keypad_wait_s)
-        if self.ladder.stop_waiting():
-            # Nothing typed: the Thinker hears so; the ladder's steps are used up.
-            self._diary.decision("order number not typed")
-            job = self.desk.job
-            if job is not None and job.live:
-                self.notebook.add(CALLER, "(typed nothing on the keypad)", job.version)
-
-    async def thinker_hand_over(self, reason: str, order_no: Any = None) -> ToolReply:
-        """The Thinker's hand-over, refused while the Guard asks for a yes or confirms one.
-
-        16 Nov 2026, food_01: the caller said "Haan sahi hai" to the yes-question, the
-        Thinker read it, decided it must confirm, found no confirm tool and handed the
-        call over, though its prompt says code confirms. A prompt rule can be skipped, so
-        code refuses; the Thinker hears why and can still hand over once the Guard is done.
-        """
-        if self.guard is not None and (self.guard.asking or self.guard.confirming is not None):
-            self._diary.decision("thinker hand over refused", reason=reason)
-            return ToolReply(REFUSED, "Not now: the caller is answering the yes-question. Other code confirms on a "
-                                      "clear yes and sends a Result: line. Press no tool; wait for that line.")
-        # Decision 27: code just asked the caller again; the answer hasn't come yet.
-        newest_ask = self.notebook.last((ASKED, CALLER))
-        if newest_ask is not None and newest_ask.kind == ASKED:
-            self._diary.decision("thinker hand over refused", reason=reason, why="the caller is being asked again")
-            return ToolReply(REFUSED, "Not yet: the caller was just asked again for the order details. Press no tool; "
-                                      "wait for their answer.")
-        # The same mistake a moment later (food_01, 16 Nov 2026): a Thinker step begun during
-        # the question finished after the confirm, and handed over a caller whose cancel had
-        # just been done. A change done, with no caller words since, needs no human.
-        newest = self.notebook.last((RESULT, CALLER))
-        if newest is not None and newest.kind == RESULT and newest.data.get("outcome") == DONE:
-            self._diary.decision("thinker hand over refused", reason=reason, why="change just done")
-            return ToolReply(REFUSED, "Not needed: the change is done (see the Result: line). Press no tool and "
-                                      "write one short line saying it is done.")
-        return await self.hand_over.now(reason, order_no)
-
-    def notes_line(self, notes: list[Note]) -> str:
-        """The Talker's view of new notes, with slots; the speaker learns it too, so the
-        number check knows every number the Talker was shown."""
-        line = "NOTES: " + "; ".join(self.view.line(note, self.language.value) for note in notes)
-        self.speaker.given(line)
-        return line
-
-    def start_feed(self, push, box: CallBox) -> None:
-        self.feed = NoteFeed(self.notebook, self.desk, self.turns, push, self._feed_wait_s, self.notes_line,
-                             hold=lambda: self.guard is not None and self.guard.asking)
-        box.start("feed", self.feed.run())
-
-    def feed_replied(self) -> None:
-        if self.feed is not None:
-            self.feed.talker_replied()
+            self.guard.cleared(event.dropped_marks)
 
     def await_spoken(self, text: str) -> asyncio.Future:
         """A future that is True once the voice has said `text` to its end, False if it was cut."""
@@ -497,6 +573,7 @@ class CallParts:
         return waiter
 
     def speech_ended(self, cut: bool, spoken: str) -> None:
+        self._speech_ended_at = asyncio.get_running_loop().time()
         for text, waiter in list(self._spoken_waiters):
             tail = "".join(text.split()[-3:]).lower()
             if waiter.done():
@@ -504,10 +581,18 @@ class CallParts:
             elif cut or tail in "".join(spoken.split()).lower():
                 waiter.set_result(not cut)
                 self._spoken_waiters.remove((text, waiter))
-        if self.feed is not None:
-            self.feed.speech_ended(cut)
         if self.guard is not None:
             self.guard.speech_ended(cut, spoken)
+
+
+def load_clips(settings: AgentCSettings, pack_words: SpokenWords, diary: Diary) -> dict[str, bytes]:
+    """The pre-made clips, read once when the robot starts (decision 11): each fixed line's
+    sound, by the words the voice would say. Missing clips (a fresh copy of the project has
+    none; make them with python -m cli.agent_c_lines make) go to the live voice."""
+    words = SpokenWords({**pack_words.groups, **SpokenWords.from_yaml(WORDS).groups})
+    folder = PROJECT_ROOT / settings.section("waiting_lines")["clips_folder"] / settings.voice["speaker"]
+    names = [clip_name(*line) for line in clip_lines(words, settings.greeting)]
+    return clips_by_words(Clips.load(folder, names, diary), words, settings.greeting)
 
 
 def load_stop_model(settings: AgentCSettings, diary: Diary) -> StopModel | None:

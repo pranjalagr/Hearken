@@ -1,11 +1,9 @@
-"""The Thinker's brain: one step = read what is new, then either press tools or stop
-with a reply (decision 7).
+"""ToolCall: one tool and its inputs, as code presses it and copies its answer
+(thinker/copy_notes.py, thinker/graph.py).
 
-The loop (thinker/loop.py) depends only on the small ThinkerBrain shape below, so
-tests drive it with a scripted fake and no key. The real brain is Gemini Flash-Lite,
-called straight through the google-genai library (no Pipecat: the Thinker is off the
-pipeline), from common/google.py's client: a time limit on every request and no
-hidden retries; the loop's try_live does the one retry the plan allows.
+The rest is the old free Thinker's brain (one step = press tools or stop with a reply),
+from before the two graphs of 17 Nov 2026; the Thinker graph asks its AI through
+thinker/step_brain.py instead, and nothing uses GeminiThinker any more.
 """
 
 from __future__ import annotations

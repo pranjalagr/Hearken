@@ -29,7 +29,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from agents.agent_c.desk import JobDesk
+from agents.agent_c.call_job import CallJob
 from agents.agent_c.guard.judge import NO, OTHER, STOP, UNCLEAR, YES, YesJudge, word_list_label
 from agents.agent_c.notebook import RESULT, YES_ANSWER, Note, Notebook
 from agents.agent_c.talker.language import StickyLanguage
@@ -101,7 +101,7 @@ class YesMoment:
 
 
 class Guard:
-    def __init__(self, door: Door, tools: Tools, box: Box, notebook: Notebook, desk: JobDesk, judge: YesJudge,
+    def __init__(self, door: Door, tools: Tools, box: Box, notebook: Notebook, desk: CallJob, judge: YesJudge,
                  words: SpokenWords, language: StickyLanguage, say: Callable[[str], Awaitable[None]],
                  send_mark: Callable[[str], Awaitable[None]], settings: GuardSettings, diary: Diary,
                  hand_over: Callable[[str], Awaitable[Any]] | None = None) -> None:

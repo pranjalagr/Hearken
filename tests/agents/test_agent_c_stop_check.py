@@ -109,12 +109,10 @@ async def test_a_stop_stops_the_voice_bumps_the_version_and_stops_the_ticket():
 
     call.switch.stop_voice = stop_voice
     call.guard = Guard()
-    call.desk.start_thinker = lambda job, desk: None
-    call.desk.open_job("cancel 4521")
     call.speech.speaking = True
     for _ in range(100):
         await call.heard_piece(LOUD)
-    assert stopped == [1] and call.desk.job.version == 2 and tickets
+    assert stopped == [1] and call.job.version == 2 and tickets  # what was being said is old news
     call.caller_finished("ruko, address bhi badalna hai")
     assert not call.stop_listener.stopped
 
@@ -156,10 +154,9 @@ async def test_agent_cs_own_pipeline_parts_let_the_call_start_and_frames_through
     from pipecat.tests.utils import run_test
 
     from agents.agent_c.robot import CallParts
-    from agents.agent_c.talker.mouth import Mouth
     from engine.contract.spoken import SpokenWords
 
     call = CallParts(load_settings(), Diary("c1", ListSink()), SpokenWords())
-    parts = Pipeline([call.switch, Mouth(call.speaker, LLMContext(), Diary("c1", ListSink()))])
+    parts = Pipeline([call.switch])  # Agent C's own pipeline part since the two graphs (17 Nov 2026)
     # A time limit: a part that swallows frames makes run_test wait forever, not fail.
     await asyncio.wait_for(run_test(parts, frames_to_send=[TextFrame("hello")], expected_down_frames=[TextFrame]), 10)

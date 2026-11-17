@@ -35,12 +35,11 @@ voice:  # decision 12, the same as Agent A's
   speaker: sunny_enhi_customer
   language: hi-IN
 
-thinker_limits:  # decision 30 (time limits), decision 19 (retries)
-  step_s: 8.0  # one Thinker step (decision 30: ~8 s, a starting guess)
-  step_retries: 1  # then a "failed" note and a hand-over
-  lookup_s: 5.0  # one lookup or prepare tool (the backend's own normal delay is 0.3 s)
-  idle_wait_s: 1.0  # one wait for news; the loop looks again after it, so a missed ring costs at most this
-  lookup_retries: 1  # decision 19: a lookup that failed or timed out is tried once more
+thinker_limits:  # decision 30 (time limits), decision 19 (retries), for the Thinker graph
+  step_s: 8.0  # one Thinker AI step (decision 30: ~8 s, a starting guess)
+  # An AI step, or a lookup or prepare that errors, is tried once more; then the job is
+  # stuck: a "failed" note and a hand-over (decisions 14, 19).
+  step_retries: 1
   # Decision 19: "same tool, inputs and answer repeat twice in a row: stop, one hand-over".
   # Read as the first time plus two repeats; Agent A's food_05 made 7 identical hand-over calls.
   same_call_limit: 3
@@ -48,23 +47,16 @@ thinker_limits:  # decision 30 (time limits), decision 19 (retries)
 notebook:
   max_notes: 200  # decision 7: no call needs more; past it something is going round in circles
 
-feed:
-  wait_s: 0.5  # one wait for a new note; the feed looks again after it
-
 # The pack's hand-over tool (decision 13). A name, so it lives here, not in code.
 hand_over_tool: hand_over_to_human
 # After a hand-over the call ends once its line has played, ended by code, not by a frame
 # in the voice's queue: on 16 Nov 2026 (food_05) the caller spoke over the line, the cut
 # dropped the queued end with it, and the call stayed open. If the line is cut it is said
 # again, at most this many times in all; the call ends at the time limit regardless.
-# Decision 27, run by code (agents/agent_c/order_ladder.py): ask again, digit by digit,
-# then the keypad, before any hand-over for an order that can't be identified.
+# Decision 27, run by the Talker graph's code: ask again, digit by digit, then the keypad,
+# before any hand-over for an order that can't be found.
 order_ladder:
-  digits: 4  # an order number's length: the keypad stops listening after this many
   keypad_wait_s: 15.0  # a guess: time to find the keypad and type four digits
-  # How alike (0-100, rapidfuzz) a word of the Thinker's name must be to a word the caller
-  # said; the ears spell names their own way ("Vikram Ro" for "Vikram Rao" scores 80).
-  name_match: 80
 hand_over_end:
   wait_s: 15.0  # a guess: the line is ~4 s, plus a caller talking over it
   tries: 2
@@ -99,3 +91,42 @@ stop_check:  # decision 26: the haan-ruko model (Part 4, v4) while the robot tal
   line: 0.30  # Part 4's chosen line for v4
   window_s: 2.0  # the model hears the last 2 s (lab/haan_ruko/sound.py WINDOW_S)
   every_s: 0.1  # one check every 0.1 s while the robot talks
+
+number_finder:  # decision 27: Sarvam points at the number words, code reads the digits
+  model: sarvam-105b-conversations
+  # A guess (the speed branch's): Sarvam's chat answered short turns in about 1 s.
+  try_s: 1.5
+  number_length: 4  # the food pack's order numbers
+
+talker_graph:  # the Talker graph (17 Nov 2026)
+  reply_s: 8.0  # one Talker AI reply's limit; then once more, then the safe line (a starting guess)
+
+# ---- Waiting lines, the silent caller and clips (build step 8, brought over 17 Nov 2026) ----
+
+speed:
+  # How often code looks at the call for the waiting and silent-caller lines.
+  # 0.1 s is under any delay a caller hears, and one look is a few comparisons.
+  tick_s: 0.1
+  # A line just sent to the voice may take ~1 s to start (decision 30); a waiting line in
+  # that gap would talk over it. Until this long after the last line was sent, the robot
+  # counts as speaking.
+  reply_grace_s: 2.0
+  # The Guard's yes-question waits for the robot to be quiet, at most this long, so it is
+  # heard as its own turn (17 Nov 2026, food_07). A guess: about one long line.
+  question_wait_s: 8.0
+  # The pause before the yes-question, after the robot's last line ended. 17 Nov 2026, food_07
+  # (run 2): ~0.4 s was too short to hear it as a new question (the lab caller needs 0.8 s of
+  # quiet for a new robot turn, and the robot sends audio up to 0.2 s ahead). A guess.
+  question_gap_s: 1.0
+
+waiting_lines:  # decision 11
+  first_s: 1.0  # the first line after ~1 s of robot silence while the Thinker works
+  every_s: 4.0  # then one every ~4 s, start to start, while it still works
+  # The clips made once by `python -m cli.agent_c_lines make`, outside git (runs/ is
+  # ignored, and sound files never go in git). One folder per voice, so a new voice
+  # never plays an old voice's clips. Without a clip the line goes to the live voice.
+  clips_folder: runs/agent_c/lines
+
+silent_caller:  # decision 13
+  hello_s: 6.0  # ~6 s of caller silence after the robot finished speaking -> "Hello, aap sun rahe hain?"
+  line_gone_s: 15.0  # ~15 s more after that -> "Lagta hai line kat gayi", then hang up

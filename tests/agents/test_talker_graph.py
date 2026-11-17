@@ -14,6 +14,7 @@ from typing import Any
 
 from agents.agent_c.notebook import (
     ANSWER,
+    ANSWERED,
     ASKS_USED_UP,
     CALLER,
     CHECKED_NUMBER,
@@ -49,7 +50,7 @@ class Voice:
     def __init__(self) -> None:
         self.said: list[str] = []
 
-    async def say(self, text: str) -> None:
+    async def say(self, text: str, again_if_cut: bool = False) -> None:
         self.said.append(text)
 
 
@@ -356,8 +357,8 @@ async def whole_call(kit, talker_ai, thinker_ai, find, turns: list[tuple[str | N
 
     def start_thinker() -> None:
         async def thinker() -> None:
-            async def hand_over(reason: str) -> None:
-                await tools.call("hand_over_to_human", {"reason": reason})
+            async def hand_over(reason: str, order_no: int | None = None) -> None:
+                await tools.call("hand_over_to_human", {"reason": reason, **({"order_no": order_no} if order_no else {})})
                 call.runner.hand_over(reason)
             parts = ThinkerParts(call.notebook, tools, thinker_ai, hand_over,
                                  build_catalog(FoodPack().actions(), kit.settings), step_s=step_s)
@@ -438,3 +439,32 @@ async def test_a_person_asked_for_mid_collect_hands_over_end_to_end(open_call):
                                    [(None, "Cancel karna hai"), (None, "Mujhe insaan se baat karni hai")])
     assert tools.calls == ["hand_over_to_human"]
     assert call.voice.said[-1] == line("line", "hand_over") and call.ended == ["the caller asked for a person"]
+
+
+async def test_a_lookup_answer_is_followed_by_anything_else():
+    # 17 Nov 2026, food_07: with no "anything else?" after a status answer, the caller's next
+    # "haan" was read as done and the robot hung up on a caller who still wanted a cancel.
+    call = Call(ScriptedTalkerAI(no_job=[("open_job", [])], collect=[("heard_number", [])]),
+                finder(**{"4521": order("4521")}))
+    await call.start()
+    await call.turn("4521")
+    await call.note(FACT, "find_order: ok", found(4521))
+    await call.note(ANSWERED, "answered from the order")
+    assert call.voice.said[-1] == line("talk", "anything_else")
+
+
+async def test_an_amount_that_is_not_the_changes_own_is_never_said():
+    # 17 Nov 2026, food_08 and food_13: answers said "₹100" and "₹380", real amounts from the
+    # order said as this refund's; the caller said no to a right refund. Code checks now.
+    call = Call(ScriptedTalkerAI(no_job=[("open_job", [])], collect=[("heard_number", [])]),
+                finder(**{"4512": order("4512")}))
+    await call.start()
+    await call.turn("4512")
+    await call.note(FACT, "find_order: ok", {"tool": "find_order", "status": "ok",
+                                             "data": {"order_no": 4512, "amount": "₹380", "status": "delivered"}})
+    await call.note(NEED_YES, "Order 4512 par ₹40 wapas bhej doon?", {"tool": "prepare_refund_order", "action": "refund_order",
+                                                                    "data": {"token": "t", "summary": "refund ₹40"}})
+    await call.note(ANSWER, "Raita ke liye ₹380 ka refund hoga.")
+    assert call.voice.said[-1] == line("line", "safe")  # 380 is the order's total, not this refund
+    await call.note(ANSWER, "Raita ke liye ₹40 wapas aayenge.")
+    assert call.voice.said[-1] == "Raita ke liye ₹40 wapas aayenge."  # the change's own amount

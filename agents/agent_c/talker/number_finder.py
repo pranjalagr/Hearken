@@ -56,9 +56,11 @@ def sarvam_find(client: httpx.AsyncClient, model: str, rules: str | None = None)
                 "messages": [{"role": "system", "content": rules}, {"role": "user", "content": words}]}
         response = await client.post("/chat/completions", json=body)
         if response.is_error:
-            # Raised with the response, so common/retry.py can see a 429 or a 5xx.
-            raise httpx.HTTPStatusError(f"Sarvam said {response.status_code}", request=response.request,
-                                        response=response)
+            # Raised with the response, so common/retry.py can see a 429 or a 5xx, and with
+            # Sarvam's own words, so the lab sees "No credits available" as a key limit and
+            # switches key (17 Nov 2026: "Sarvam said 402" alone was counted as the robot's fault).
+            raise httpx.HTTPStatusError(f"Sarvam said {response.status_code}: {response.text[:200]}",
+                                        request=response.request, response=response)
         answer = json.loads(response.json()["choices"][0]["message"]["content"] or "")
         return list(answer.get("numbers") or [])
 

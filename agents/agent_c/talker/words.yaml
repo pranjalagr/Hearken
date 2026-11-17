@@ -68,8 +68,8 @@ result:
     hinglish: "Ek second, main check kar raha hoon ki address badla ya nahi."
     english: "One moment, I am checking whether the address was changed."
 
-# Decision 27, run by code (agents/agent_c/order_ladder.py): when the caller's order
-# can't be identified, code says these, in order, before any hand-over. The order
+# Decision 27, run by the Talker graph's code: when the caller's order can't be found,
+# code says these, in order, before any hand-over. The order
 # number's steps end on the keypad, which can't be misheard (16 Nov 2026: the ears
 # heard "4533" as "45 35" three times in one call).
 ladder:
@@ -82,12 +82,6 @@ ladder:
   number_keypad:
     hinglish: "Order number phone ke keypad se type kijiye, phir hash dabaiye."
     english: "Please type the order number on your phone's keypad, then press hash."
-  name_again:
-    hinglish: "Order kis naam par hai, poora naam bataiye?"
-    english: "What is the full name on the order?"
-  name_once_more:
-    hinglish: "Maaf kijiye, naam match nahi hua. Order par jo naam hai, woh ek baar phir bataiye?"
-    english: "Sorry, the name did not match. Could you say the name on the order once more?"
 
 # The Talker graph's own fixed lines (decided 17 Nov 2026: fixed where the words must be
 # exact or instant; AI where the content changes). A number is always filled in by code,
@@ -126,3 +120,31 @@ talk:
   sorry:
     hinglish: "Maaf kijiye, mujhse yeh nahi ho paaya."
     english: "Sorry, I could not do this."
+
+# Waiting and silent-caller lines (build step 8), brought over 17 Nov 2026 for the Talker graph.
+# Decision 11: one of these after ~1 s of robot silence while the back office works, then
+# one every ~4 s, never the same twice in a row. Each says only "I'm on it": no outcome,
+# no promise, so any of them is true at any moment of the work.
+waiting:
+  dekh_raha:
+    hinglish: "Ek second, dekh raha hoon."
+    english: "One second, I am looking."
+  check_kar_raha:
+    hinglish: "Bas ek minute, check kar raha hoon."
+    english: "Just a minute, I am checking."
+  line_par_rahiye:
+    hinglish: "Line par bane rahiye, dekh raha hoon."
+    english: "Please stay on the line, I am looking."
+  thoda_samay:
+    hinglish: "Thoda sa samay lag raha hai, main dekh raha hoon."
+    english: "It is taking a little time, I am still looking."
+
+# Decision 13: the caller has gone quiet after the robot spoke. The first asks; the
+# second is said once, and then the call ends.
+silent:
+  hello:
+    hinglish: "Hello, aap sun rahe hain?"
+    english: "Hello, can you hear me?"
+  line_gone:
+    hinglish: "Lagta hai line kat gayi. Dobara call kijiye. Dhanyavaad."
+    english: "It seems the line has dropped. Please call again. Thank you."

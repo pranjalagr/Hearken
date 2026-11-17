@@ -16,7 +16,7 @@ from typing import Any
 
 # The kinds of note. Who writes each is fixed: code copies backend answers (FACT,
 # NEED_YES, RESULT); the Thinker's own words are ANSWER, NEED_INFO or STILL_GOOD.
-REQUEST = "request"        # the Talker opened a job (ask_thinker)
+REQUEST = "request"        # the Talker opened a job (its words)
 CALLER = "caller"          # a finished caller turn, passed to the Thinker during a job
 FACT = "fact"              # a backend answer, copied by code
 NEED_INFO = "need_info"    # the Thinker needs something from the caller
@@ -32,9 +32,10 @@ ORDER_NUMBER = "order_number"      # the Talker heard a full order number (its r
 CHECKED_NUMBER = "checked_number"  # the Thinker's AI checked that number; the only one used or said
 PLAN = "plan"                      # the Thinker's plan, said instead of a waiting line
 ASKS_USED_UP = "asks_used_up"      # the Talker asked again, digit by digit and by keypad: still not found
+ANSWERED = "answered"              # the Thinker answered from the order (a lookup): the Talker asks "anything else?"
 
 KINDS = (REQUEST, CALLER, FACT, NEED_INFO, NEED_YES, RESULT, ANSWER, STILL_GOOD, FAILED, YES_ANSWER, ASKED,
-         ORDER_NUMBER, CHECKED_NUMBER, PLAN, ASKS_USED_UP)
+         ORDER_NUMBER, CHECKED_NUMBER, PLAN, ASKS_USED_UP, ANSWERED)
 # What the caller should hear about, through the Talker.
 SPEAKABLE = (FACT, NEED_INFO, RESULT, ANSWER, FAILED, CHECKED_NUMBER, PLAN)
 

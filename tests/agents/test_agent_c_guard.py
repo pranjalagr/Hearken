@@ -6,10 +6,9 @@ import asyncio
 
 import pytest
 
-from agents.agent_c.desk import JobDesk
+from agents.agent_c.call_job import CallJob
 from agents.agent_c.guard.guard import DONE, STOPPED, Guard, GuardSettings
 from agents.agent_c.guard.judge import NO, OTHER, STOP, UNCLEAR, YES, TimedJudge, read_label, word_list_label
-from agents.agent_c.job import Turns
 from agents.agent_c.notebook import NEED_YES, RESULT, YES_ANSWER, Notebook
 from agents.agent_c.robot import WORDS
 from agents.agent_c.talker.language import StickyLanguage
@@ -51,8 +50,7 @@ class Rig:
     def __init__(self, kit, judge):
         self.kit = kit
         self.book = Notebook(200)
-        self.desk = JobDesk(self.book, Turns(), lambda job, desk: None, Diary("c1", ListSink()))
-        self.desk.open_job("cancel 4521")
+        self.desk = CallJob()  # the job's version and its changes in flight (17 Nov 2026)
         self.said, self.marks, self.sink = [], [], ListSink()
         self.box = CallBox(CallBoxSettings(change_wait_s=5.0))
 
@@ -231,8 +229,8 @@ async def test_a_slow_judge_is_unclear_never_yes_and_counts_as_a_request():
     assert requests == [1] and errors
 
 
-@pytest.mark.parametrize("module", ["agents.agent_c.thinker.loop", "agents.agent_c.talker.mouth",
-                                    "agents.agent_c.talker.ask_thinker", "agents.agent_c.desk"])
+@pytest.mark.parametrize("module", ["agents.agent_c.thinker.graph", "agents.agent_c.thinker.step_brain",
+                                    "agents.agent_c.talker.graph", "agents.agent_c.talker.talker_ai"])
 def test_no_ai_facing_part_can_reach_a_ticket(module):
     import importlib
 

@@ -21,6 +21,7 @@ brings its own parts in `TalkerParts`.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, TypedDict
@@ -31,6 +32,7 @@ from langgraph.types import Command, interrupt
 
 from agents.agent_c.notebook import (
     ANSWER,
+    ANSWERED,
     ASKS_USED_UP,
     CALLER,
     CHECKED_NUMBER,
@@ -45,7 +47,8 @@ from agents.agent_c.notebook import (
     Note,
     Notebook,
 )
-from agents.agent_c.talker.number_finder import FOR_THINKER, HEARD, SHORT, FindNumbers, what_was_heard
+from agents.agent_c.talker.number_finder import (FOR_THINKER, HEARD, NO_NUMBER, SHORT, FindNumbers, Heard,
+                                                  what_was_heard)
 from agents.agent_c.talker.slots import stray_numbers
 from agents.agent_c.talker.talker_ai import REPLY, TalkerAI
 from engine.contract.spoken import SpokenWords
@@ -57,11 +60,16 @@ OWN_NOTES = (REQUEST, CALLER, ORDER_NUMBER, ASKS_USED_UP)
 # Decision 27's ask-again steps after "not found", in order (lines in words.yaml's "ladder").
 LADDER = ("number_again", "number_digits", "number_keypad")
 KEYPAD_END = "#"
+# Notes not said once the caller has spoken since they were worked out (decision 16). The
+# yes-question, results, questions and failures are always said: skipping one would leave
+# the job waiting for an answer the caller never heard.
+OLD_NEWS_SKIPPED = (PLAN, ANSWER, CHECKED_NUMBER, FACT)
 
 
 class Voice(Protocol):
-    async def say(self, text: str) -> None:
-        """Say one line to the caller."""
+    async def say(self, text: str, again_if_cut: bool = False) -> None:
+        """Say one line to the caller. `again_if_cut`: if the caller cuts it off, say it once
+        more (a result line must be heard, decision 7)."""
         ...
 
 
@@ -94,6 +102,15 @@ class TalkerParts:
     greeting: str  # the call's first line (the same for every robot in the lab)
     language: Callable[[], str] = lambda: "hinglish"  # the sticky call language (decision 10)
     version: Callable[[], int] = lambda: 1  # the job's version, for each note (decision 16)
+    new_turn: Callable[[], None] = lambda: None  # a caller turn during a job: older notes become old news
+    reply_s: float = 8.0  # one AI reply's time limit (decision 30's Thinker step; a starting guess)
+    # The Thinker's plan goes here to be said in place of the next waiting line (17 Nov 2026);
+    # None: said at once (no waiting lines, as in tests of the graph alone).
+    hold_plan: Callable[[str], None] | None = None
+    on_error: Callable[[str], None] = lambda text: None  # the call's diary, for errors the call survives
+    # The call's diary, for each Talker AI decision and finder answer (17 Nov 2026: food_05 lost
+    # an order number five times and the diary couldn't show which part missed it).
+    on_step: Callable[[str, dict[str, Any]], None] = lambda step, details: None
     number_length: int = 4
     keypad_s: float = 15.0  # time to type the number on the keypad (a starting guess)
     max_sentences: int = 2  # decision 8: 1-2 sentences per reply
@@ -144,10 +161,31 @@ def _safe(parts: TalkerParts, text: str) -> str:
     return text
 
 
+# An amount of money in a line: "₹380", "380 rupaye", "380 rupees".
+_MONEY = re.compile(r"₹\s?(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:rupaye|rupees|rupay|rs\.?)", re.IGNORECASE)
+
+
+def _amounts(text: str) -> set[str]:
+    return {a or b for a, b in _MONEY.findall(text)}
+
+
+def _money_ok(parts: TalkerParts, text: str) -> bool:
+    """Every amount in a Thinker AI line is the change's own (its yes-question or result) or
+    one the caller said. 17 Nov 2026, food_08 and food_13: an answer said "₹100" and "₹380",
+    real amounts from the order (an old refund, the order total) said as this refund's, and
+    the caller said no to a right refund. A prompt rule didn't hold, so code checks."""
+    allowed: set[str] = set()
+    for note in parts.notebook.notes:
+        if note.kind in (NEED_YES, RESULT, REQUEST, CALLER):
+            allowed |= _amounts(note.text + " " + str(note.data))
+    return _amounts(text) <= allowed
+
+
 async def _say_ai_text(parts: TalkerParts, text: str) -> None:
-    """Say a line the Thinker's AI wrote (a plan, a question, an explanation), made safe."""
+    """Say a line the Thinker's AI wrote (a plan, a question, an explanation), made safe:
+    no made-up number, and no amount that isn't the change's own or the caller's."""
     if text.strip():
-        await parts.voice.say(_safe(parts, text))
+        await parts.voice.say(_safe(parts, text) if _money_ok(parts, text) else _line(parts, "line", "safe"))
 
 
 def _write(parts: TalkerParts, kind: str, text: str, data: dict[str, Any] | None = None) -> None:
@@ -162,7 +200,9 @@ def _caller_words(parts: TalkerParts) -> list[str]:
 
 async def _ai_reply(parts: TalkerParts, step: str, facts: dict[str, Any], exits: tuple[str, ...]) -> str:
     """Let the Talker's AI answer a turn: its sentences go to the voice as they come,
-    each made safe first. Returns its exit ("reply", or the tool it called)."""
+    each made safe first. Returns its exit ("reply", or the tool it called).
+    A failed or slow request is asked once more if nothing was said yet; after that the
+    safe line plays, and the call goes on (decision 30)."""
     said = 0
 
     async def speak(sentence: str) -> None:
@@ -171,7 +211,18 @@ async def _ai_reply(parts: TalkerParts, step: str, facts: dict[str, Any], exits:
             said += 1
             await parts.voice.say(_safe(parts, sentence))
 
-    return await parts.ai.reply(step, {**facts, "language": parts.language()}, exits, speak)
+    for _ in range(2):
+        try:
+            exit_ = await asyncio.wait_for(
+                parts.ai.reply(step, {**facts, "language": parts.language()}, exits, speak), parts.reply_s)
+            parts.on_step(step, {"exit": exit_})
+            return exit_
+        except Exception:
+            if said:
+                break  # part of the reply was said: asking again would repeat it
+    if not said:
+        await _say_fixed(parts, "line", "safe")
+    return REPLY
 
 
 # ---- the waiting steps ------------------------------------------------------------------
@@ -185,7 +236,7 @@ def make_wait(mode: str) -> Callable[[TalkState, Any], TalkState]:
     keypad it waits at most keypad_s."""
     def wait(state: TalkState, config) -> TalkState:
         timeout = _parts(config).keypad_s if mode == "wait_keypad" else None
-        return {"event": interrupt({"timeout": timeout}), "mode": mode}
+        return {"event": interrupt({"timeout": timeout, "mode": mode}), "mode": mode}
     wait.__name__ = mode
     return wait
 
@@ -231,15 +282,33 @@ async def collect_turn(state: TalkState, config) -> TalkState:
     parts = _parts(config)
     words = state["event"]["words"]
     if state.get("mode") in ("wait_collect", "wait_keypad"):
+        parts.new_turn()
         _write(parts, CALLER, words)  # every turn in a job reaches the Thinker (decision 7)
     exit_ = await _ai_reply(parts, "collect", {"caller_said": words}, ("heard_number",))
     if exit_ != "heard_number":
         return {"after": "wait_collect"}  # the AI answered and asked for the number
-    heard = what_was_heard(await parts.find_numbers(words), words, parts.number_length)
+    numbers: list = []
+    try:
+        numbers = await parts.find_numbers(words)
+        heard = what_was_heard(numbers, words, parts.number_length)
+        parts.on_step("number finder", {"words": words, "numbers": numbers, "heard": heard.what, "digits": heard.digits})
+    except Exception as error:
+        # The finder failed (no credit, a timeout): the call goes on. The Thinker's AI reads
+        # the number from the caller's words instead, as for words the reader can't read
+        # (17 Nov 2026: a finder's 402 crashed the Talker and ended food_02).
+        parts.on_error(f"number finder failed: {error!r}"[:300])
+        heard = Heard(FOR_THINKER)
     if heard.what == HEARD or heard.what == FOR_THINKER:
         # Unreadable number words go to the Thinker's AI as they are (15 Nov 2026).
         await _say_fixed(parts, "talk", "number_heard")
         _write(parts, ORDER_NUMBER, heard.digits or words, {"digits": heard.digits, "words": words})
+        return {"after": "wait_job"}
+    if heard.what == NO_NUMBER and numbers:
+        # The AI heard an order number and the finder found number words but didn't tag
+        # them as the order ("45 30" tagged "other", 17 Nov 2026, food_02): the Thinker's AI
+        # reads them with the whole call, as for unreadable number words.
+        await _say_fixed(parts, "talk", "number_heard")
+        _write(parts, ORDER_NUMBER, words, {"digits": "", "words": words})
         return {"after": "wait_job"}
     if heard.what == SHORT:
         await _say_fixed(parts, "talk", "number_again_full")
@@ -253,6 +322,7 @@ async def job_turn(state: TalkState, config) -> TalkState:
     AI answers as usual: says back what it understood, never an outcome (decision 18)."""
     parts = _parts(config)
     words = state["event"]["words"]
+    parts.new_turn()
     _write(parts, CALLER, words)
     notes = [note.text for note in parts.notebook.notes if note.kind not in OWN_NOTES][-6:]
     await _ai_reply(parts, "job_open", {"caller_said": words, "notes": notes}, ())
@@ -263,6 +333,7 @@ async def yes_turn(state: TalkState, config) -> TalkState:
     """A caller turn during the yes moment: the Guard reads it (decisions 20-23). It is
     also written for the Thinker, as every turn in a job is (decision 7)."""
     parts = _parts(config)
+    parts.new_turn()
     _write(parts, CALLER, state["event"]["words"])
     await parts.guard.answer(state["event"]["words"], state["event"].get("start_ms"))
     return {}
@@ -280,6 +351,13 @@ async def say_note(state: TalkState, config) -> TalkState:
     parts = _parts(config)
     note = state["event"]["note"]
     kind, data = note["kind"], note["data"]
+    if kind != PLAN and parts.hold_plan is not None:
+        # The plan's work has moved on (an answer, a question, a result): a plan not yet
+        # said is stale (17 Nov 2026, food_03: it came after the explanation of a refusal).
+        parts.hold_plan("")
+    if kind in OLD_NEWS_SKIPPED and note.get("version", 0) < parts.version():
+        # The caller spoke after this was worked out: it may no longer hold (decision 16).
+        return {"after": state.get("mode", "wait_job")}
     if kind == CHECKED_NUMBER:
         # The only number the caller ever hears: the Thinker's checked one (decision 27).
         await _say_fixed(parts, "talk", "number_back", number=note["text"])
@@ -297,6 +375,10 @@ async def say_note(state: TalkState, config) -> TalkState:
         # The Thinker couldn't tell the number from the words: ask for it again.
         await _say_fixed(parts, "talk", "number_again_full")
         return {"after": "wait_collect"}
+    if kind == PLAN and parts.hold_plan is not None:
+        # Said in place of the next waiting line, keeping their pace (decided 17 Nov 2026).
+        parts.hold_plan(_safe(parts, note["text"]))
+        return {"after": state.get("mode", "wait_job")}
     if kind in (NEED_INFO, PLAN, ANSWER):
         # Written by the Thinker's AI: a question, its plan, or an explanation. The call
         # stays where it was (an answer during the yes moment keeps the yes moment).
@@ -309,7 +391,16 @@ async def say_note(state: TalkState, config) -> TalkState:
         # The Guard's result: a fixed line per action and outcome, then "anything else?".
         action, outcome = data.get("action", ""), data.get("outcome", "")
         if f"{action}_{outcome}" in parts.words.values("result"):
-            await _say_fixed(parts, "result", f"{action}_{outcome}")
+            # Said again if the caller cuts it off: a result must be heard (decision 7, 17 Nov).
+            await parts.voice.say(_line(parts, "result", f"{action}_{outcome}"), again_if_cut=True)
+        if outcome in ("done", "stopped"):
+            # Only when the change is settled. A refused one gets its reason and the offer of a
+            # person next (the Thinker explains); an unknown one is still being checked.
+            await _say_fixed(parts, "talk", "anything_else")
+        return {"after": "wait_job"}
+    if kind == ANSWERED:
+        # A lookup's answer is said (the found order); then, as after any result, the fixed
+        # "anything else?" (17 Nov 2026), so the caller's reply really answers it.
         await _say_fixed(parts, "talk", "anything_else")
         return {"after": "wait_job"}
     if kind == FAILED:
@@ -355,6 +446,7 @@ async def keypad_timeout(state: TalkState, config) -> TalkState:
 async def goodbye(state: TalkState, config) -> TalkState:
     """The caller is done: say goodbye and hang up."""
     parts = _parts(config)
+    _drop_plan(parts)
     await _say_fixed(parts, "talk", "goodbye")
     await parts.end_call("the caller said goodbye")
     return {}
@@ -363,9 +455,17 @@ async def goodbye(state: TalkState, config) -> TalkState:
 async def hand_over(state: TalkState, config) -> TalkState:
     """The Thinker handed over: say the hand-over line, then end the call (decision 13)."""
     parts = _parts(config)
+    _drop_plan(parts)
     await _say_fixed(parts, "line", "hand_over")
     await parts.end_call(str(state["event"].get("reason", "handed over")))
     return {}
+
+
+def _drop_plan(parts: TalkerParts) -> None:
+    """The call is ending: a plan not yet said must never come after the last line
+    (17 Nov 2026, food_02: "Mai aapka order cancel kar raha hoon" after the hand-over line)."""
+    if parts.hold_plan is not None:
+        parts.hold_plan("")
 
 
 def job_closed(state: TalkState, config) -> TalkState:
@@ -454,6 +554,7 @@ class TalkerRunner:
         self._config = {"configurable": {"thread_id": call_id, "parts": parts}, "recursion_limit": 500}
         self._events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._seen = 0  # the last note number already turned into an event
+        self.mode = ""  # where the call waits now (wait_no_job, wait_collect, wait_job, ...)
 
     def turn(self, words: str, start_ms: int | None = None) -> None:
         """A finished caller turn."""
@@ -477,7 +578,9 @@ class TalkerRunner:
         try:
             result = await self._graph.ainvoke({}, self._config)
             while "__interrupt__" in result:
-                event = await self._next(result["__interrupt__"][0].value.get("timeout"))
+                paused = result["__interrupt__"][0].value
+                self.mode = paused.get("mode", "")
+                event = await self._next(paused.get("timeout"))
                 result = await self._graph.ainvoke(Command(resume=event), self._config)
         finally:
             SAVER.delete_thread(self._config["configurable"]["thread_id"])
@@ -493,7 +596,7 @@ class TalkerRunner:
                 self._seen = note.number
                 if note.kind not in OWN_NOTES:
                     return {"kind": NOTE, "note": {"number": note.number, "kind": note.kind, "text": note.text,
-                                                   "data": dict(note.data)}}
+                                                   "version": note.version, "data": dict(note.data)}}
             left = None if deadline is None else deadline - loop.time()
             if left is not None and left <= 0:
                 return {"kind": TIMEOUT}

@@ -26,10 +26,17 @@ ANSWER = "answer"          # the Thinker's final reply for the caller
 STILL_GOOD = "still_good"  # after new caller words: the notes already given still hold
 FAILED = "failed"          # the Thinker could not finish: the job ends, offer a human
 YES_ANSWER = "yes_answer"  # the Guard's reading of the caller's answer to a yes-question
+ASKED = "asked"            # code asked the caller itself (decision 27's steps): already spoken
+# Added 17 Nov 2026 for the two graphs (decisions 16, 27):
+ORDER_NUMBER = "order_number"      # the Talker heard a full order number (its reader's digits)
+CHECKED_NUMBER = "checked_number"  # the Thinker's AI checked that number; the only one used or said
+PLAN = "plan"                      # the Thinker's plan, said instead of a waiting line
+ASKS_USED_UP = "asks_used_up"      # the Talker asked again, digit by digit and by keypad: still not found
 
-KINDS = (REQUEST, CALLER, FACT, NEED_INFO, NEED_YES, RESULT, ANSWER, STILL_GOOD, FAILED, YES_ANSWER)
+KINDS = (REQUEST, CALLER, FACT, NEED_INFO, NEED_YES, RESULT, ANSWER, STILL_GOOD, FAILED, YES_ANSWER, ASKED,
+         ORDER_NUMBER, CHECKED_NUMBER, PLAN, ASKS_USED_UP)
 # What the caller should hear about, through the Talker.
-SPEAKABLE = (FACT, NEED_INFO, RESULT, ANSWER, FAILED)
+SPEAKABLE = (FACT, NEED_INFO, RESULT, ANSWER, FAILED, CHECKED_NUMBER, PLAN)
 
 
 class NotebookFull(RuntimeError):

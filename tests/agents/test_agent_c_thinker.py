@@ -21,7 +21,7 @@ from engine.service.tool_catalog import ToolSpec
 from packs.food.pack import FoodPack
 
 LIMITS = ThinkerLimits(step_s=0.5, step_retries=1, lookup_s=0.5, idle_wait_s=0.05)
-RAHUL = {"order_no": 4521, "customer_name": "Rahul Verma"}
+RAHUL = {"order_no": 4521}
 
 
 class ListSink:

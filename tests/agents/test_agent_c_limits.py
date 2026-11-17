@@ -21,7 +21,7 @@ from engine.contract.spoken import SpokenWords
 from engine.service.replies import ERROR, OK, ToolReply
 from packs.food.pack import FoodPack
 
-RAHUL = {"order_no": 4521, "customer_name": "Rahul Verma"}
+RAHUL = {"order_no": 4521}
 HAND_OVER = "hand_over_to_human"
 LIMITS = ThinkerLimits(step_s=0.5, step_retries=0, lookup_s=0.5, idle_wait_s=0.05, lookup_retries=1, same_call_limit=3)
 SETTINGS = GuardSettings(reask_wait_s=0.05, vad_start_s=0.2, stop_words={"ruko": STOP, "nahi": NO}, change_retries=2,
@@ -125,7 +125,7 @@ async def test_the_thinkers_own_hand_over_goes_through_code_and_ends_the_job(ope
 async def test_a_failed_lookup_is_tried_once_more_but_a_refusal_never(open_call):
     kit = await open_call(FoodPack())
     tools = CountingTools(kit.backend, fail=lambda tool, n: ToolReply(ERROR, "timed out") if n == 1 else None)
-    brain = ScriptedBrain(Step((ToolCall("find_order", RAHUL),)), Step((ToolCall("find_order", {**RAHUL, "customer_name": "Priya"}),)),
+    brain = ScriptedBrain(Step((ToolCall("find_order", RAHUL),)), Step((ToolCall("find_order", {"order_no": 4599}),)),  # no such order: refused
                           Step(text="done"))
     await run(kit, brain, tools)
     assert tools.calls == ["find_order", "find_order", "find_order"]  # the error retried, the refusal not

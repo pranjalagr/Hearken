@@ -33,6 +33,10 @@ class JobDesk:
         self._waiting_reply: tuple[StepMark, int] | None = None  # (step, reply note) waiting to be spoken
         self.on_prepared: Callable[[Note], Awaitable[None]] | None = None  # the Guard, from build step 4
         self.on_hand_over: Callable[[str, Any], Awaitable[ToolReply]] | None = None  # the call's one hand-over
+        # Decision 27's steps, run by code (agents/agent_c/order_ladder.py); None: not asked again.
+        self.on_missed: Callable[[str], Awaitable[bool]] | None = None
+        self.name_heard: Callable[[str], bool] = lambda name: True  # the name check; on in a real call
+        self.caller_words: list[str] = []  # every finished caller turn, job or not, for the name check
 
     # ---- the Talker's side ------------------------------------------------------
 
@@ -71,6 +75,7 @@ class JobDesk:
         word list decides what matters (decision 7). It also bumps the version, so
         notes written before these words wait (decision 16)."""
         self._turns.finish()
+        self.caller_words.append(words)
         job = self.job
         if job is not None and job.live:
             job.bump()
@@ -113,6 +118,21 @@ class JobDesk:
     async def prepared(self, note: Note) -> None:
         if self.on_prepared is not None:
             await self.on_prepared(note)
+
+    async def missed(self, problem: str) -> bool:
+        return await self.on_missed(problem) if self.on_missed is not None else False
+
+    def caller_said(self, name: str) -> bool:
+        return self.name_heard(name)
+
+    def typed_number(self, number: str) -> None:
+        """The caller typed the order number on the keypad: it reaches the Thinker as the
+        caller's words, which can't be misheard."""
+        text = f"(typed on the keypad) order number {number}"
+        self.caller_words.append(text)
+        if self.job is not None and self.job.live:
+            self.job.bump()
+            self._notebook.add(CALLER, text, self.job.version)
 
     async def hand_over(self, reason: str, order_no: Any = None) -> ToolReply:
         if self.on_hand_over is None:

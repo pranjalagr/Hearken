@@ -8,6 +8,10 @@ onnx==1.23.2
 onnxruntime==1.31.1
 # Agent A (and later C) are built on Pipecat; its Google part needs google-genai 3.x (15 Nov 2026).
 pipecat-ai[google,sarvam,silero,mcp]==1.16.0
+# Agent C's Talker and Thinker graphs (17 Nov 2026). Build each graph once at program start,
+# never during a call: compiling reads every step's code, and 20 builds at once froze the
+# loop for over 100 ms in the LangGraph test.
+langgraph==1.2.22
 pyarrow==26.0.1
 pytest-asyncio==1.4.1
 pytest==9.2.0

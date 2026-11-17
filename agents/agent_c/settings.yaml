@@ -57,6 +57,14 @@ hand_over_tool: hand_over_to_human
 # in the voice's queue: on 16 Nov 2026 (food_05) the caller spoke over the line, the cut
 # dropped the queued end with it, and the call stayed open. If the line is cut it is said
 # again, at most this many times in all; the call ends at the time limit regardless.
+# Decision 27, run by code (agents/agent_c/order_ladder.py): ask again, digit by digit,
+# then the keypad, before any hand-over for an order that can't be identified.
+order_ladder:
+  digits: 4  # an order number's length: the keypad stops listening after this many
+  keypad_wait_s: 15.0  # a guess: time to find the keypad and type four digits
+  # How alike (0-100, rapidfuzz) a word of the Thinker's name must be to a word the caller
+  # said; the ears spell names their own way ("Vikram Ro" for "Vikram Rao" scores 80).
+  name_match: 80
 hand_over_end:
   wait_s: 15.0  # a guess: the line is ~4 s, plus a caller talking over it
   tries: 2

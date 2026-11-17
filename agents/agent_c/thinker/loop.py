@@ -16,15 +16,17 @@ from typing import Any, Protocol
 
 from agents.agent_c.job import Job, StepMark
 from agents.agent_c.live_retry import try_live
-from agents.agent_c.notebook import CALLER, FAILED, NEED_YES, REQUEST, RESULT, YES_ANSWER, Note, Notebook
+from agents.agent_c.notebook import ASKED, CALLER, FAILED, NEED_YES, REQUEST, RESULT, YES_ANSWER, Note, Notebook
+from agents.agent_c.order_ladder import NAME_UNHEARD
 from agents.agent_c.thinker.brain import Step, ThinkerBrain, ToolCall
 from agents.agent_c.thinker.copy_notes import note_for_reply, note_for_stop
 from agents.common.diary import Diary
 from agents.common.tools import Tools
-from engine.service.replies import ERROR, ToolReply
+from engine.service.replies import ERROR, REFUSED, ToolReply
 
 # What the Thinker reads from the notebook, and how each line starts for it.
-NEWS = {REQUEST: "Request", CALLER: "Caller", YES_ANSWER: "Caller's answer to the yes-question", RESULT: "Result"}
+NEWS = {REQUEST: "Request", CALLER: "Caller", YES_ANSWER: "Caller's answer to the yes-question", RESULT: "Result",
+        ASKED: "Asked the caller (by code)"}
 THINKER_FAILED = "thinker failed"
 GOING_ROUND = "going round in circles"
 
@@ -59,6 +61,15 @@ class JobHooks(Protocol):
         """The call's one hand-over (agents/agent_c/hand_over.py)."""
         ...
 
+    async def missed(self, problem: str) -> bool:
+        """The caller's order could not be identified (a tagged refusal). True if code
+        asked the caller again itself (decision 27), so this step ends here."""
+        ...
+
+    def caller_said(self, name: str) -> bool:
+        """Did the caller say this name somewhere in the call?"""
+        ...
+
 
 class Thinker:
     def __init__(self, job: Job, notebook: Notebook, brain: ThinkerBrain, tools: Tools, allowed: Collection[str],
@@ -89,6 +100,13 @@ class Thinker:
                     self._job.end(GOING_ROUND)  # first, so the job's end names the reason
                     await self._hooks.hand_over("The back office kept getting the same answer.")
                     return
+                problem = next((answer["data"].get("problem") for _, answer in results
+                                if answer["status"] == REFUSED and answer["data"].get("problem")), None)
+                if problem and await self._hooks.missed(problem):
+                    # Code asked the caller again (decision 27): wait for the answer. The
+                    # results stay, so the next step still hands the brain its tool answers.
+                    self._hooks.stopped(mark, None)
+                    await self._wait_for_news()
                 continue
             results = []
             stop = note_for_stop(step.text)
@@ -131,6 +149,11 @@ class Thinker:
         elif call.name == self._hand_over_tool:
             reply = await self._hooks.hand_over(str(call.inputs.get("reason") or "the caller needs a human"),
                                                 call.inputs.get("order_no"))
+        elif call.inputs.get("customer_name") and not self._hooks.caller_said(str(call.inputs["customer_name"])):
+            # Never sent: 16 Nov 2026 (food_08) the Thinker looked orders up as "customer", a
+            # name the caller never said, and counted its own guesses as asking again.
+            reply = ToolReply(REFUSED, "The caller has not said this name. Ask the caller for the name on the order.",
+                              {"problem": NAME_UNHEARD})
         else:
             reply = await self._lookup(call)
         self._diary.tool(call.name, dict(call.inputs), reply.status, (time.perf_counter() - started) * 1000,

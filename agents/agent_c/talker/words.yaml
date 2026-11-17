@@ -67,3 +67,62 @@ result:
   change_address_unknown:
     hinglish: "Ek second, main check kar raha hoon ki address badla ya nahi."
     english: "One moment, I am checking whether the address was changed."
+
+# Decision 27, run by code (agents/agent_c/order_ladder.py): when the caller's order
+# can't be identified, code says these, in order, before any hand-over. The order
+# number's steps end on the keypad, which can't be misheard (16 Nov 2026: the ears
+# heard "4533" as "45 35" three times in one call).
+ladder:
+  number_again:
+    hinglish: "Maaf kijiye, yeh order nahi mila. Order number ek baar phir bataiye?"
+    english: "Sorry, I could not find that order. Could you say the order number again?"
+  number_digits:
+    hinglish: "Order number ek-ek digit karke bataiye?"
+    english: "Could you say the order number one digit at a time?"
+  number_keypad:
+    hinglish: "Order number phone ke keypad se type kijiye, phir hash dabaiye."
+    english: "Please type the order number on your phone's keypad, then press hash."
+  name_again:
+    hinglish: "Order kis naam par hai, poora naam bataiye?"
+    english: "What is the full name on the order?"
+  name_once_more:
+    hinglish: "Maaf kijiye, naam match nahi hua. Order par jo naam hai, woh ek baar phir bataiye?"
+    english: "Sorry, the name did not match. Could you say the name on the order once more?"
+
+# The Talker graph's own fixed lines (decided 17 Nov 2026: fixed where the words must be
+# exact or instant; AI where the content changes). A number is always filled in by code,
+# and only ever the Thinker's checked number (decision 27).
+talk:
+  # Played the moment a job opens: never with a number.
+  quick:
+    hinglish: "Ji, ek second."
+    english: "Sure, one second."
+  ask_number:
+    hinglish: "Aapka order number bataiye?"
+    english: "Could you tell me your order number?"
+  # The reader heard fewer or more than four digits.
+  number_again_full:
+    hinglish: "Maaf kijiye, poora order number bataiye? Chaar digit ka hota hai."
+    english: "Sorry, could you say the full order number? It has four digits."
+  # A full number was heard: the caller knows they were heard, but no number is said yet.
+  number_heard:
+    hinglish: "Ji, number mil gaya. Ek second, dekh raha hoon."
+    english: "Got the number. One second, let me check."
+  # The Thinker's checked number, said back before the lookup.
+  number_back:
+    hinglish: "{number}, dekh raha hoon."
+    english: "{number}, let me check."
+  # The order was found: its number and its status, in the pack's own words.
+  order_found:
+    hinglish: "Order {number} mil gaya. {status}"
+    english: "I found order {number}. {status}"
+  anything_else:
+    hinglish: "Aur kuch madad kar sakta hoon?"
+    english: "Is there anything else I can help you with?"
+  goodbye:
+    hinglish: "Dhanyavaad, aapka din shubh ho."
+    english: "Thank you, have a good day."
+  # The Thinker could not finish (decision 14): an apology, then the hand-over line.
+  sorry:
+    hinglish: "Maaf kijiye, mujhse yeh nahi ho paaya."
+    english: "Sorry, I could not do this."

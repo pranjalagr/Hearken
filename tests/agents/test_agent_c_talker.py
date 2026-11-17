@@ -160,7 +160,7 @@ def test_the_talker_reads_the_backends_reason_for_a_refusal():
     from engine.contract.spoken import SpokenWords
     from engine.service.replies import ToolReply
 
-    kind, text, data = note_for_reply(ToolCall("prepare_cancel_order", {"order_no": "4531", "customer_name": "Aman"}),
+    kind, text, data = note_for_reply(ToolCall("prepare_cancel_order", {"order_no": "4531"}),
                                       ToolReply("refused", "No order 4531 found. Ask the caller to repeat the number."))
     line = NoteView(SpokenWords()).line(Note(1, kind, text, 1, data), "hinglish")
     assert "No order 4531 found" in line

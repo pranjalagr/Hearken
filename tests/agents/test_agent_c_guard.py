@@ -22,7 +22,7 @@ from engine.contract.spoken import SpokenWords
 from engine.lab_controls.normal_delays import NormalDelays
 from packs.food.pack import FoodPack
 
-RAHUL = {"order_no": 4521, "customer_name": "Rahul Verma"}
+RAHUL = {"order_no": 4521}
 STOP_WORDS = {"ruko": STOP, "mat": STOP, "wait": STOP, "stop": STOP, "nahi": NO}
 SETTINGS = GuardSettings(reask_wait_s=0.05, vad_start_s=0.2, stop_words=STOP_WORDS)
 

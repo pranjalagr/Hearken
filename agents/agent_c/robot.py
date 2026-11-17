@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,7 +38,8 @@ from agents.agent_c.guard.judge import TimedJudge, YesJudge, first_answer, gemin
 from agents.agent_c.guard.partial_words import PartialWords
 from agents.agent_c.hand_over import HANDED_OVER, HandOver
 from agents.agent_c.job import Job, Turns
-from agents.agent_c.notebook import CALLER, RESULT, Note, Notebook
+from agents.agent_c.notebook import ASKED, CALLER, REQUEST, RESULT, Note, Notebook
+from agents.agent_c.order_ladder import OrderLadder, caller_said
 from agents.agent_c.settings import AgentCSettings
 from agents.agent_c.stop_check import OnnxStopModel, StopListener, StopModel
 from agents.agent_c.stop_switch import StopSwitch
@@ -178,6 +179,8 @@ class AgentC:
             Talker's history, so it knows what the caller heard."""
             call.speaker.heard(text)  # numbers the caller heard from the backend may be repeated
             await task.queue_frames([TTSSpeakFrame(text)])
+
+        call.say = say  # the order ladder's fixed lines go the same way
 
         async def say_and_end(text: str) -> None:
             """The hand-over line, then the end. Code ends the call once the line has played
@@ -333,6 +336,14 @@ class CallParts:
         # The Talker's end_call: refused while the back office still works on the job.
         self.hang_up = HangUp(diary, not_now=lambda: self.desk.why_not_end())
         self._spoken_waiters: list[tuple[str, asyncio.Future]] = []  # lines waiting to be heard to the end
+        # Decision 27, run by code: ask again, digit by digit, then the keypad (order_ladder.py).
+        ladder = settings.section("order_ladder")
+        self.ladder = OrderLadder(int(ladder["digits"]))
+        self._keypad_wait_s = float(ladder["keypad_wait_s"])
+        self._name_match = int(ladder["name_match"])
+        self.say: Callable[[str], Awaitable[None]] | None = None  # set once the call has begun
+        self.desk.on_missed = self.order_missed
+        self.desk.name_heard = self.name_heard
         self.box: CallBox | None = None
         self._diary = diary
         self.switch = StopSwitch(name="stop-switch")
@@ -387,7 +398,14 @@ class CallParts:
             self.guard.partial(words)
 
     def receipt(self, event: Played | Cleared | Key) -> None:
-        """The caller's receipts and keys, for the Guard's timing (decision 22)."""
+        """The caller's receipts and keys, for the Guard's timing (decision 22). A key goes
+        to the order ladder while it waits for a typed order number (decision 27)."""
+        if isinstance(event, Key) and self.ladder.waiting_keys and (self.guard is None or not self.guard.asking):
+            number = self.ladder.key(event.digit)
+            if number is not None:
+                self._diary.decision("order number typed", number=number)
+                self.desk.typed_number(number)
+            return
         if self.guard is None:
             return
         if isinstance(event, Played):
@@ -396,6 +414,37 @@ class CallParts:
             self.guard.cleared(event.dropped_marks)
         else:
             self.guard.key(event.digit, event.caller_ms)
+
+    def name_heard(self, name: str) -> bool:
+        """The name check: the caller said this name somewhere in the call (their turns, and
+        the requests the Talker passed on in their words)."""
+        requests = " ".join(note.text for note in self.notebook.notes if note.kind == REQUEST)
+        return caller_said(name, " ".join(self.desk.caller_words) + " " + requests, self._name_match)
+
+    async def order_missed(self, problem: str) -> bool:
+        """The caller's order wasn't identified: code says the next fixed line itself, so
+        the Thinker can't ask for the wrong thing (food_09, 16 Nov 2026: a wrong number,
+        and it asked for the name three times). False once the steps are used up."""
+        step = self.ladder.miss(problem)
+        self._diary.decision("order ladder", problem=problem, step=step)
+        if step is None or self.say is None:
+            return False
+        line = self.words.phrase("ladder", step, self.language.value)
+        job = self.desk.job
+        self.notebook.add(ASKED, self.words.phrase("ladder", step, "english"), job.version if job else 0, {"step": step})
+        await self.say(line)
+        if self.ladder.waiting_keys and self.box is not None:
+            self.box.start("keypad wait", self._keypad_timeout())
+        return True
+
+    async def _keypad_timeout(self) -> None:
+        await asyncio.sleep(self._keypad_wait_s)
+        if self.ladder.stop_waiting():
+            # Nothing typed: the Thinker hears so; the ladder's steps are used up.
+            self._diary.decision("order number not typed")
+            job = self.desk.job
+            if job is not None and job.live:
+                self.notebook.add(CALLER, "(typed nothing on the keypad)", job.version)
 
     async def thinker_hand_over(self, reason: str, order_no: Any = None) -> ToolReply:
         """The Thinker's hand-over, refused while the Guard asks for a yes or confirms one.
@@ -409,6 +458,12 @@ class CallParts:
             self._diary.decision("thinker hand over refused", reason=reason)
             return ToolReply(REFUSED, "Not now: the caller is answering the yes-question. Other code confirms on a "
                                       "clear yes and sends a Result: line. Press no tool; wait for that line.")
+        # Decision 27: code just asked the caller again; the answer hasn't come yet.
+        newest_ask = self.notebook.last((ASKED, CALLER))
+        if newest_ask is not None and newest_ask.kind == ASKED:
+            self._diary.decision("thinker hand over refused", reason=reason, why="the caller is being asked again")
+            return ToolReply(REFUSED, "Not yet: the caller was just asked again for the order details. Press no tool; "
+                                      "wait for their answer.")
         # The same mistake a moment later (food_01, 16 Nov 2026): a Thinker step begun during
         # the question finished after the confirm, and handed over a caller whose cancel had
         # just been done. A change done, with no caller words since, needs no human.

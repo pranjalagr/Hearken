@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agents.agent_c.notebook import CALLER, NEED_INFO, NEED_YES, YES_ANSWER, Notebook
+from agents.agent_c.notebook import ASKED, CALLER, NEED_INFO, NEED_YES, YES_ANSWER, Notebook
 
 OPEN = "open"
 ANSWER_GIVEN = "answer given"
@@ -98,7 +98,7 @@ def failing_checks(job: Job, step: StepMark, turns: Turns, notebook: Notebook, r
         failing.append(CHECKS[0])
     if turns.begun != step.begun or turns.speaking:
         failing.append(CHECKS[1])
-    asked = notebook.last((NEED_INFO, NEED_YES))
+    asked = notebook.last((NEED_INFO, NEED_YES, ASKED))  # ASKED: code asked the caller itself
     answered = notebook.last((CALLER, YES_ANSWER))
     if asked is not None and (answered is None or answered.number < asked.number):
         failing.append(CHECKS[2])

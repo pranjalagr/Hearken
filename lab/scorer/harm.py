@@ -128,6 +128,7 @@ def _doubles(done: list[Done]) -> list[Harm]:
 
 def _comparable(inputs: dict[str, Any]) -> dict[str, Any]:
     # The same request even if a name is spelled differently (decision 14's same_request).
+    # No tool takes a name since 17 Nov 2026; kept so older runs still re-mark the same.
     return {k: v for k, v in inputs.items() if k != "customer_name"}
 
 

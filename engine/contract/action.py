@@ -37,14 +37,18 @@ class Check:
 
     allowed: bool
     reason: str = ""
+    # Which of the tool's inputs was wrong ("order_no"), so an agent's code can ask again
+    # without reading the caller-facing words. One general tag for every pack, named by
+    # the input, not one tag per reason (decided 17 Nov 2026; Agent C counts its misses).
+    wrong_input: str = ""
 
     @staticmethod
     def ok() -> Check:
         return Check(True)
 
     @staticmethod
-    def refuse(reason: str) -> Check:
-        return Check(False, reason)
+    def refuse(reason: str, wrong_input: str = "") -> Check:
+        return Check(False, reason, wrong_input)
 
 
 @dataclass(frozen=True)

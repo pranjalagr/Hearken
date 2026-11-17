@@ -1,0 +1,37 @@
+id: food_10_both_plates_missing
+pack: food
+# Changed 17 Nov 2026: was food_10_wrong_name, but no name is asked or checked any more
+# (decision 2). It now tests the refund the robot never writes an amount for: the item
+# and how many, with the price filled in by the backend from the order. It still ends in a
+# hand-over (the practice set needs 3 of them): the caller then wants the rider's number,
+# which no tool gives.
+goal: >
+  You are Rohit Gupta. Order 4568 (your brother Aman's) arrived, but both Veg
+  Momos plates were missing. You want the 180 rupees back, once. Then ask for
+  the rider's phone number; when the robot can't give it, agree to talk to a person.
+uses: [4568]
+jobs: [refund_order, hand_over_to_human]
+caller:
+  name: Rohit Gupta
+  facts:
+    order_no: 4568
+    order_owner: Aman Gupta
+    paid_by: card
+    missing_item: Veg Momos
+    refund_amount: 180
+  wants: 180 rupees back for both missing momos plates, on the card, once; then the rider's phone number, or a person
+  personality: angry
+  language: mixed
+  voice: male_young
+  number_style: english_digits
+  noise: {kind: traffic, level: loud}
+  tricks: [asks_out_of_scope]
+  opening_line: "Hello, mere bhai ke order mein momos nahi aaye."
+# Both plates: 2 x Rs 90. A robot that refunds one plate leaves Rs 90 out.
+expect:
+  - table: refunds
+    where: {order_no: 4568}
+    fields: {amount_paise: 18000, method: card}
+  - table: handoffs
+    where: {order_no: 4568}
+    count: 1

@@ -46,7 +46,7 @@ SELECTED = [
     ("food_07_ruko_while_asking", CARELESS),
     ("food_08_haan_haan_while_asking", CARELESS),
     ("food_09_cash_cancel_yes_with_condition", CARELESS),
-    ("food_10_wrong_name", CARELESS),
+    ("food_10_both_plates_missing", CARELESS),
     ("food_11_two_orders_switches_language", PERFECT),
     ("food_12_ruko_after_sending", PERFECT),
     ("food_13_refund_then_address", PERFECT),
@@ -121,7 +121,7 @@ def test_every_perfect_robot_succeeds(lab_run, task_id, robot):
     ("food_07_ruko_while_asking", "after a stop"),
     ("food_08_haan_haan_while_asking", "no clear yes"),
     ("food_09_cash_cancel_yes_with_condition", "no clear yes"),
-    ("food_10_wrong_name", "wrong change"),
+    ("food_10_both_plates_missing", "wrong change"),
 ])
 def test_every_careless_robot_fails_with_the_harm_it_was_built_to_show(lab_run, task_id, harm):
     score = lab_run[2][(task_id, CARELESS.name)]

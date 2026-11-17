@@ -124,7 +124,7 @@ class Backend:
             draft = LogEntry(at=now, tool=tool, action=action.name, inputs=inputs)
             verdict = await action.check(tx, inputs)
             if not verdict.allowed:
-                return await self._refuse(tx, draft, verdict.reason)
+                return await self._refuse(tx, draft, verdict.reason, verdict.wrong_input)
             summary = await action.summarize(tx, inputs) if action.risky else ""
             switch = await self._switches.claim(tx, switch)
             if switch and switch.kind == FAIL:
@@ -161,7 +161,7 @@ class Backend:
                 return _already_done(done)
             verdict = await action.check(tx, inputs)
             if not verdict.allowed:
-                return await self._refuse(tx, draft, verdict.reason)
+                return await self._refuse(tx, draft, verdict.reason, verdict.wrong_input)
             waiting = await self._tokens.waiting_for_request(tx, key, now)
             if waiting is not None:
                 await self._log.write(
@@ -244,7 +244,7 @@ class Backend:
             # 4. The rules again: the world may have moved since prepare.
             verdict = await action.check(tx, prepared.inputs)
             if not verdict.allowed:
-                return await self._refuse(tx, draft, verdict.reason)
+                return await self._refuse(tx, draft, verdict.reason, verdict.wrong_input)
             switch = await self._switches.claim(tx, switch)
             if switch and switch.kind == FAIL:
                 return await self._fail(tx, draft, switch)
@@ -293,11 +293,12 @@ class Backend:
         if seconds > 0:
             await self._sleep(seconds)
 
-    async def _refuse(self, tx: Tx, draft: LogEntry, reason: str) -> ToolReply:
+    async def _refuse(self, tx: Tx, draft: LogEntry, reason: str, wrong_input: str = "") -> ToolReply:
         """Refuse inside an open transaction. Only the log row (and any timeline
-        moves) get saved; no money moves."""
+        moves) get saved; no money moves. The input the check named as wrong, if any,
+        goes in the data."""
         await self._log.write(tx, replace(draft, outcome=REFUSED, reason=reason))
-        return ToolReply(REFUSED, reason)
+        return ToolReply(REFUSED, reason, {"wrong_input": wrong_input} if wrong_input else {})
 
     async def _refuse_alone(
         self,

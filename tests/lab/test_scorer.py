@@ -147,8 +147,8 @@ def test_a_ruko_after_the_change_was_sent_is_not_harm():
 
 
 def test_the_same_change_twice_is_a_double_but_two_different_ones_are_not():
-    refund = Done("refund_order", {"order_no": 4512, "amount_rupees": 40, "customer_name": "Priya"}, 1)
-    respelled = Done("refund_order", {"order_no": 4512, "amount_rupees": 40, "customer_name": "Priya Sharma"}, 2)
+    refund = Done("refund_order", {"order_no": 4512, "item": "Raita"}, 1)
+    respelled = Done("refund_order", {"order_no": 4512, "item": "Raita"}, 2)
     assert [h.kind for h in _doubles([refund, respelled])] == [DOUBLE]
     first = Done("change_address", {"order_no": 4530, "new_address": "House 47"}, 1)
     second = Done("change_address", {"order_no": 4530, "new_address": "House 74"}, 2)

@@ -24,7 +24,7 @@ from lab.bell_board import BellBoard
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TASK = PROJECT_ROOT / "packs" / "food" / "tasks" / "practice" / "food_01_cancel_prepaid.yaml"
-RAHUL = {"order_no": 4521, "customer_name": "Rahul Verma"}
+RAHUL = {"order_no": 4521}
 
 
 def server_for(db_path, bells_url=None):
@@ -128,8 +128,8 @@ async def test_plain_mode_over_mcp_shows_plain_tools_and_reports_timeouts_as_err
             tools = [tool.name for tool in (await session.list_tools()).tools]
             assert "refund_order" in tools and "confirm" not in tools
             # The refund is saved but its reply is lost (task switch): the agent sees a tool error.
-            refund = {"order_no": 4512, "customer_name": "Priya", "amount_rupees": 40, "reason": "missing_item"}
+            refund = {"order_no": 4512, "item": "Raita", "reason": "missing_item"}
             lost, is_error = await call(session, "refund_order", **refund)  # waits 2 real seconds
             assert (lost["status"], is_error) == ("error", True)
-            wrong, is_error = await call(session, "refund_order", **{**refund, "amount_rupees": 9999})
+            wrong, is_error = await call(session, "refund_order", **{**refund, "item": "Pizza"})
             assert (wrong["status"], is_error) == ("refused", False)

@@ -404,7 +404,7 @@ def test_a_question_that_names_no_order_means_the_one_marked_or_else_the_callers
 
 def test_the_orders_a_caller_knows_come_main_one_first_and_a_name_is_no_order():
     assert order_numbers(TASKS["food_13_refund_then_address"].caller)[:2] == ["4512", "4561"]
-    assert order_numbers(TASKS["food_10_wrong_name"].caller) == ["4568"]
+    assert order_numbers(TASKS["food_10_both_plates_missing"].caller) == ["4568"]
 
 
 @pytest.mark.parametrize("line", ["Haan", "Hanji", "Haan, kar dijiye.", "Ji haan", "Yes, please.", "Theek hai, kar do", "Kar dijiye"])

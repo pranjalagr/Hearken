@@ -33,7 +33,7 @@ from packs.food.pack import FoodPack
 pytestmark = pytest.mark.usefixtures("no_freezes")
 
 TASK = load_task(Path(__file__).resolve().parents[2] / "packs" / "food" / "tasks" / "practice" / "food_01_cancel_prepaid.yaml")
-RAHUL = {"order_no": 4521, "customer_name": "Rahul Verma"}
+RAHUL = {"order_no": 4521}
 RUKO = "ruko, cancel mat karo!"
 
 

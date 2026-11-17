@@ -4,8 +4,8 @@ from engine.lab_controls.switches import Switch
 from engine.lab_controls.timeline import PlannedChange
 from packs.food.pack import FoodPack
 
-AMAN = {"order_no": 4530, "customer_name": "Aman"}
-PRIYA_REFUND = {"order_no": 4512, "customer_name": "Priya", "amount_rupees": 40, "reason": "missing_item"}
+AMAN = {"order_no": 4530}
+PRIYA_REFUND = {"order_no": 4512, "item": "Raita", "reason": "missing_item"}
 
 
 async def test_order_leaves_while_the_caller_is_asked_so_cancel_is_refused(open_call):

@@ -59,6 +59,13 @@ class CallKit:
         rows = await self.rows(sql, *params)
         return rows[0] if rows else None
 
+    async def set_item_price(self, order_no: int, item: str, paise: int) -> None:
+        """A refund's amount comes from the item's price (17 Nov 2026), so a test of how an
+        amount is said sets that price instead of passing an amount."""
+        async with self.db.transaction() as tx:
+            await tx.execute("UPDATE order_items SET price_paise = ? WHERE order_no = ? AND item = ?",
+                             (paise, order_no, item))
+
 
 @pytest.fixture
 async def open_call(tmp_path: Path):

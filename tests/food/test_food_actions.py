@@ -2,7 +2,7 @@
 
 from packs.food.pack import FoodPack
 
-RAHUL = {"order_no": 4521, "customer_name": "Rahul Verma"}
+RAHUL = {"order_no": 4521}
 
 
 async def approve_and_confirm(kit, prepare_tool, **inputs):
@@ -16,7 +16,7 @@ async def approve_and_confirm(kit, prepare_tool, **inputs):
 
 async def test_find_order_gives_a_short_answer(open_call):
     kit = await open_call(FoodPack())
-    reply = await kit.tool("find_order", order_no=4561, customer_name="priya")
+    reply = await kit.tool("find_order", order_no=4561)
     assert reply.status == "ok"
     assert reply.data == {
         "order_no": 4561,
@@ -29,12 +29,14 @@ async def test_find_order_gives_a_short_answer(open_call):
     }
 
 
-async def test_find_order_checks_who_is_calling(open_call):
+async def test_find_order_needs_only_the_number_and_names_a_wrong_one(open_call):
+    # Decision 2, changed 17 Nov 2026: no name. A miss names the wrong input, so an agent's
+    # code can ask again without reading the words.
     kit = await open_call(FoodPack())
-    wrong_name = await kit.tool("find_order", order_no=4521, customer_name="Priya")
-    assert wrong_name.status == "refused" and "name does not match" in wrong_name.message
-    unknown = await kit.tool("find_order", order_no=4599, customer_name="Priya")
+    assert (await kit.tool("find_order", order_no=4521)).status == "ok"
+    unknown = await kit.tool("find_order", order_no=4599)
     assert unknown.message == "No order 4599 found. Ask the caller to repeat the number."
+    assert unknown.data == {"wrong_input": "order_no"}
 
 
 async def test_cancel_prepaid_order_refunds_to_the_original_method(open_call):
@@ -50,33 +52,33 @@ async def test_cancel_prepaid_order_refunds_to_the_original_method(open_call):
 
 async def test_cancel_cash_order_has_no_refund(open_call):
     kit = await open_call(FoodPack())
-    reply = await approve_and_confirm(kit, "prepare_cancel_order", order_no=4533, customer_name="Neha")
+    reply = await approve_and_confirm(kit, "prepare_cancel_order", order_no=4533)
     assert reply.message == "Done: cancel order 4533 (cash on delivery, so nothing to refund)."
     assert await kit.rows("SELECT * FROM refunds WHERE order_no = 4533") == []
 
 
 async def test_cancel_is_refused_once_the_order_left_or_was_cancelled(open_call):
     kit = await open_call(FoodPack())
-    gone = await kit.tool("prepare_cancel_order", order_no=4540, customer_name="Vikram")
+    gone = await kit.tool("prepare_cancel_order", order_no=4540)
     assert gone.message == "Order 4540 is already out for delivery, so it can't be cancelled."
-    twice = await kit.tool("prepare_cancel_order", order_no=4572, customer_name="Neha")
+    twice = await kit.tool("prepare_cancel_order", order_no=4572)
     assert twice.message == "Order 4572 is already cancelled."
 
 
 async def test_change_address_only_before_dispatch(open_call):
     kit = await open_call(FoodPack())
     new = "Flat 2C, Rose Apartments, Model Town, Ludhiana"
-    done = await approve_and_confirm(kit, "prepare_change_address", order_no=4561, customer_name="Priya", new_address=new)
+    done = await approve_and_confirm(kit, "prepare_change_address", order_no=4561, new_address=new)
     assert done.status == "ok"
     assert (await kit.one("SELECT address FROM orders WHERE order_no = 4561"))["address"] == new
-    late = await kit.tool("prepare_change_address", order_no=4540, customer_name="Vikram", new_address=new)
+    late = await kit.tool("prepare_change_address", order_no=4540, new_address=new)
     assert late.message == "Order 4540 is out for delivery, so the address can't be changed now."
 
 
 async def test_partial_refund_for_a_missing_item(open_call):
     kit = await open_call(FoodPack())
     reply = await approve_and_confirm(
-        kit, "prepare_refund_order", order_no=4512, customer_name="Priya", amount_rupees=40, reason="missing_item"
+        kit, "prepare_refund_order", order_no=4512, item="Raita", reason="missing_item"
     )
     assert reply.message == "Done: refund ₹40 on order 4512 to upi for a missing item."
     assert (await kit.one("SELECT amount_paise FROM refunds WHERE order_no = 4512"))["amount_paise"] == 4000
@@ -84,15 +86,17 @@ async def test_partial_refund_for_a_missing_item(open_call):
 
 async def test_refund_is_refused_when_it_breaks_a_rule(open_call):
     kit = await open_call(FoodPack())
-    sana = {"order_no": 4547, "customer_name": "Sana", "reason": "missing_item"}
-    # ₹500 paid, ₹100 already refunded before the call, so ₹400 is left.
-    too_much = await kit.tool("prepare_refund_order", **sana, amount_rupees=401)
+    sana = {"order_no": 4547, "reason": "missing_item"}
+    # 2 x Veg Thali at ₹250: ₹500 paid, ₹100 already refunded before the call, so ₹400 is left.
+    too_much = await kit.tool("prepare_refund_order", **sana, item="Veg Thali")
     assert too_much.message == "That is more than what is left to refund on order 4547 (₹400)."
-    other_method = await kit.tool("prepare_refund_order", **sana, amount_rupees=50, to_method="card")
+    other_method = await kit.tool("prepare_refund_order", **sana, item="Veg Thali", quantity=1, to_method="card")
     assert other_method.message == "Refunds only go back to the original payment method (upi)."
-    odd_amount = await kit.tool("prepare_refund_order", **sana, amount_rupees=10.555)
-    assert odd_amount.message == "The amount must be in rupees, like 40 or 120.50."
-    not_delivered = await kit.tool("prepare_refund_order", **RAHUL, amount_rupees=50, reason="missing_item")
+    not_on_order = await kit.tool("prepare_refund_order", **sana, item="Raita")
+    assert not_on_order.message == "Order 4547 has no item 'Raita'." and not_on_order.data == {"wrong_input": "item"}
+    too_many = await kit.tool("prepare_refund_order", **sana, item="veg  thali", quantity=3)
+    assert too_many.message == "Order 4547 has 2 x Veg Thali." and too_many.data == {"wrong_input": "quantity"}
+    not_delivered = await kit.tool("prepare_refund_order", **RAHUL, item="Paneer Butter Masala", reason="missing_item")
     assert "only for delivered orders" in not_delivered.message
     assert await kit.rows("SELECT * FROM refunds WHERE at >= 0") == []  # no refund was made
 

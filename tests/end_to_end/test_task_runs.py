@@ -95,7 +95,7 @@ async def test_the_practice_set_covers_every_job_moment_trick_and_ending(tmp_pat
     assert coverage.gaps(actions) == [], coverage.grid()
     assert sorted(do_nothing) == [
         "food_02_cancel_raced_by_dispatch", "food_05_too_late_hand_over", "food_06_status_out_of_scope",
-        "food_07_ruko_while_asking", "food_10_wrong_name",
+        "food_07_ruko_while_asking",  # food_10 refunds now (17 Nov 2026: no name check)
     ]
 
 
@@ -126,7 +126,7 @@ async def test_checker_catches_a_forbidden_action(open_call):
         forbid=[Forbidden("cancel_order")],
     )
     kit = await open_call(FoodPack(), mode="plain")
-    await kit.tool("cancel_order", order_no=4521, customer_name="Rahul")
+    await kit.tool("cancel_order", order_no=4521)
     verdict = await checked(kit, task)
     assert verdict.problems == ["forbidden: cancel_order happened 1 time(s)"]
 
@@ -145,7 +145,7 @@ async def test_a_sloppy_robot_that_also_changes_another_order_fails(open_call):
     kit = await open_call(FoodPack(), task=task)
     before = await snapshot(kit)
     steps, _ = script_for(task.id, "perfect")
-    extra = [UseTool("prepare_change_address", {"order_no": 4561, "customer_name": "Priya Sharma",
+    extra = [UseTool("prepare_change_address", {"order_no": 4561,
                                                 "new_address": "Somewhere new"}),
              UseTool("confirm", approve=True)]
     await play(kit, steps + extra)
@@ -160,7 +160,7 @@ async def test_an_extra_change_to_a_row_the_task_names_still_fails(open_call):
     task = TASKS["food_01_cancel_prepaid"]
     kit = await open_call(FoodPack(), task=task)
     before = await snapshot(kit)
-    extra = [UseTool("prepare_change_address", {"order_no": 4521, "customer_name": "Rahul Verma",
+    extra = [UseTool("prepare_change_address", {"order_no": 4521,
                                                 "new_address": "Somewhere new"}),
              UseTool("confirm", approve=True)]
     steps, _ = script_for(task.id, "perfect")

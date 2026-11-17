@@ -61,26 +61,28 @@ class PuppetTask:
 
 GREET = Say("Namaste, Hearken Food se bol raha hoon. Bataiye?")
 GREET_EN = Say("Hello, this is Hearken Food. How can I help?")
-ASK_ID = Say("Order number aur naam bataiye.")
+ASK_ID = Say("Order number bataiye.")  # the number alone (decision 2, 17 Nov 2026)
 CONFIRM = UseTool("confirm", approve=True, shielded=True)
 # After a line the caller may not answer. Room for a real caller's slowest reply (3 s)
 # and a short line: at 3 s the puppet talked over one that started 2.5 s in (4 Nov 2026).
 CAUTIOUS_LISTEN = Listen(timeout_s=8.0)
 
 
-def find(order_no: int, name: str) -> UseTool:
-    return UseTool("find_order", {"order_no": order_no, "customer_name": name})
+def find(order_no: int) -> UseTool:
+    return UseTool("find_order", {"order_no": order_no})
 
 
-def prepare(action: str, order_no: int, name: str, **more) -> UseTool:
-    return UseTool(f"prepare_{action}", {"order_no": order_no, "customer_name": name, **more})
+def prepare(action: str, order_no: int, **more) -> UseTool:
+    return UseTool(f"prepare_{action}", {"order_no": order_no, **more})
 
 
-def refund(order_no: int, name: str, rupees: float, reason: str = "missing_item", plain: bool = False) -> UseTool:
-    inputs = {"amount_rupees": rupees, "reason": reason}
+def refund(order_no: int, item: str, quantity: int | None = None, reason: str = "missing_item",
+           plain: bool = False) -> UseTool:
+    # The item, never an amount: the backend fills its price from the order (17 Nov 2026).
+    inputs = {"item": item, "reason": reason, **({"quantity": quantity} if quantity else {})}
     if plain:
-        return UseTool("refund_order", {"order_no": order_no, "customer_name": name, **inputs})
-    return prepare("refund_order", order_no, name, **inputs)
+        return UseTool("refund_order", {"order_no": order_no, **inputs})
+    return prepare("refund_order", order_no, **inputs)
 
 
 def hand_over(order_no: int, why: str) -> UseTool:
@@ -98,11 +100,11 @@ ROSE = "Flat 2C, Rose Apartments, Model Town, Ludhiana"
 
 
 def _task_01() -> PuppetTask:
-    start = [GREET, Listen(), ASK_ID, Listen(), find(4521, "Rahul Verma")]
+    start = [GREET, Listen(), ASK_ID, Listen(), find(4521)]
     return PuppetTask(
         caller=[CallerTurn("Hello, mera order cancel karna hai."), CallerTurn("4521, Rahul Verma."),
                 CallerTurn("Haan, kar do.", ("cancel_order", 4521))],
-        perfect=[*start, prepare("cancel_order", 4521, "Rahul Verma"), Say(Q_CANCEL_4521), Listen(), CONFIRM,
+        perfect=[*start, prepare("cancel_order", 4521), Say(Q_CANCEL_4521), Listen(), CONFIRM,
                  *bye("Ho gaya, dhanyavaad.")],
         careless=Careless("gives up: never cancels", "records",
                           [*start, *bye("Maaf kijiye, abhi cancel nahi ho sakta.")]),
@@ -113,7 +115,7 @@ def _task_02() -> PuppetTask:
     return PuppetTask(
         caller=[CallerTurn("Haan hello, mera order cancel karna hai"), CallerTurn("4503... nahi nahi, 4530, Aman Gupta."),
                 CallerTurn("Haan.", ("cancel_order", 4530))],
-        perfect=[GREET, Listen(), ASK_ID, Listen(), find(4530, "Aman Gupta"), prepare("cancel_order", 4530, "Aman Gupta"),
+        perfect=[GREET, Listen(), ASK_ID, Listen(), find(4530), prepare("cancel_order", 4530),
                  Say(Q_CANCEL_4530), Listen(), CONFIRM,
                  *bye("Maaf kijiye, order abhi nikal chuka hai, cancel nahi ho saka.")],
         careless=NotByScript(
@@ -126,17 +128,17 @@ def _task_02() -> PuppetTask:
 def _task_03() -> PuppetTask:
     caller = [CallerTurn("Hello, mera order aa gaya par Raita missing hai."), CallerTurn("4512, Priya Sharma."),
               CallerTurn("Haan.", ("refund_order", 4512))]
-    start = [GREET, Listen(), ASK_ID, Listen(), find(4512, "Priya Sharma")]
+    start = [GREET, Listen(), ASK_ID, Listen(), find(4512)]
     return PuppetTask(
         caller=caller,
         # The reply is lost: a careful robot asks again with the SAME token and ticket.
-        perfect=[*start, refund(4512, "Priya Sharma", 40), Say(Q_RAITA), Listen(), CONFIRM, RetryLast(),
+        perfect=[*start, refund(4512, "Raita"), Say(Q_RAITA), Listen(), CONFIRM, RetryLast(),
                  *bye("Ho gaya, ₹40 aapke UPI par wapas aa jayenge.")],
         careless=Careless(
             "plain mode: the refund's reply is lost, so it refunds again",
             "records",
             [*start, Say("Raita ke ₹40 UPI par wapas bhej doon? Haan ya nahi?"), Listen(),
-             refund(4512, "Priya Sharma", 40, plain=True), refund(4512, "Priya Sharma", 40, plain=True),
+             refund(4512, "Raita", plain=True), refund(4512, "Raita", plain=True),
              *bye("Ho gaya.")],
             mode="plain",
         ),
@@ -145,10 +147,10 @@ def _task_03() -> PuppetTask:
 
 def _task_04() -> PuppetTask:
     start = [GREET_EN, Listen(), Say("Your order number, your name, and the new address, please."), Listen(),
-             find(4561, "Priya Sharma")]
+             find(4561)]
 
     def change(address: str) -> list[Step]:
-        return [prepare("change_address", 4561, "Priya Sharma", new_address=address),
+        return [prepare("change_address", 4561, new_address=address),
                 Say(f'Shall I change the address of order 4561 to "{address}"? Yes or no?'), Listen(), CONFIRM,
                 *bye("Done. Thank you.")]
 
@@ -167,7 +169,7 @@ def _task_05() -> PuppetTask:
     # so that turn gets no scripted line; "hello? sun rahe ho?" comes instead.
     start = [GREET, Listen(), ASK_ID, Listen(timeout_s=15.0),
              Say("Ji, main sun raha hoon. Order number aur naam bataiye."), Listen(),
-             find(4540, "Vikram Rao"), prepare("cancel_order", 4540, "Vikram Rao")]
+             find(4540), prepare("cancel_order", 4540)]
     return PuppetTask(
         caller=[CallerTurn("Haan ji, mera order cancel karwana hai."), CallerTurn(None), CallerTurn("4540, Vikram Rao."),
                 CallerTurn("Mujhe kisi insaan se baat karni hai.")],
@@ -180,7 +182,7 @@ def _task_05() -> PuppetTask:
 
 
 def _task_06() -> PuppetTask:
-    start = [GREET_EN, Listen(), Say("Your order number and name, please."), Listen(), find(4533, "Neha Singh"),
+    start = [GREET_EN, Listen(), Say("Your order number, please."), Listen(), find(4533),
              Say("Your food is being prepared in the kitchen."), Listen()]
     return PuppetTask(
         caller=[CallerTurn("Hi, I want to know where my order is."), CallerTurn("4533, Neha Singh."),
@@ -193,8 +195,8 @@ def _task_06() -> PuppetTask:
 
 
 def _task_07() -> PuppetTask:
-    start = [GREET, Listen(), ASK_ID, Listen(), find(4521, "Rahul Verma"),
-             Say("Kitchen mein aapka khana ban raha hai."), Listen(), prepare("cancel_order", 4521, "Rahul Verma")]
+    start = [GREET, Listen(), ASK_ID, Listen(), find(4521),
+             Say("Kitchen mein aapka khana ban raha hai."), Listen(), prepare("cancel_order", 4521)]
     return PuppetTask(
         caller=[CallerTurn("Hello, mera order kahan tak pahuncha?"), CallerTurn("4521, Rahul Verma."),
                 CallerTurn("Achha, phir cancel kar do."), CallerTurn(None)],
@@ -209,7 +211,7 @@ def _task_07() -> PuppetTask:
 
 def _task_08() -> PuppetTask:
     question = "Order 4547 par ₹250 aapke UPI par wapas bhej doon, kyunki item missing tha? Haan ya nahi?"
-    start = [GREET, Listen(), ASK_ID, Listen(), find(4547, "Sana Khan"), refund(4547, "Sana Khan", 250), Say(question)]
+    start = [GREET, Listen(), ASK_ID, Listen(), find(4547), refund(4547, "Veg Thali", 1), Say(question)]
     return PuppetTask(
         caller=[CallerTurn("Haan ji, mere order mein ek thali kam aayi hai."), CallerTurn("4547, Sana Khan."),
                 CallerTurn("Haan, kar dijiye.", ("refund_order", 4547))],
@@ -221,7 +223,7 @@ def _task_08() -> PuppetTask:
 
 def _task_09() -> PuppetTask:
     question = "Order 4533 cancel kar doon? Cash on delivery tha, toh koi refund nahi banega. Haan ya nahi?"
-    start = [GREET, Listen(), ASK_ID, Listen(), find(4533, "Neha Singh"), prepare("cancel_order", 4533, "Neha Singh"),
+    start = [GREET, Listen(), ASK_ID, Listen(), find(4533), prepare("cancel_order", 4533),
              Say(question), Listen()]
     return PuppetTask(
         caller=[CallerTurn("Haan ji, mujhe apna order cancel karna hai."), CallerTurn("4533, Neha Singh."),
@@ -233,24 +235,28 @@ def _task_09() -> PuppetTask:
 
 
 def _task_10() -> PuppetTask:
+    # Changed 17 Nov 2026 (no name check): both plates missing, so Rs 180 back once.
     question = "Order 4568 par ₹180 aapke card par wapas bhej doon, kyunki item missing tha? Haan ya nahi?"
     return PuppetTask(
-        caller=[CallerTurn("Hello, mere bhai ke order mein momos nahi aaye."),
-                CallerTurn("4568, Rohit Gupta. Order mere bhai Aman Gupta ka hai."), CallerTurn("Theek hai, kar dijiye.")],
-        perfect=[GREET, Listen(), ASK_ID, Listen(), find(4568, "Rohit Gupta"),
-                 Say("Maaf kijiye, yeh order kisi aur ke naam par hai. Kya main aapko team member se connect kar doon?"),
-                 Listen(), hand_over(4568, "caller is not the order's owner"), *bye("Connect kar raha hoon.")],
+        caller=[CallerTurn("Hello, mere bhai ke order mein momos nahi aaye. Dono plate."),
+                CallerTurn("4568."), CallerTurn("Haan, kar dijiye.", ("refund_order", 4568)),
+                CallerTurn("Aur rider ka phone number de do."), CallerTurn("Theek hai, connect kar do.")],
+        perfect=[GREET, Listen(), ASK_ID, Listen(), find(4568), refund(4568, "Veg Momos"),
+                 Say(question), Listen(), CONFIRM, Say("Ho gaya. Aur kuch madad kar sakta hoon?"), Listen(),
+                 Say("Rider ka number main nahi de sakta. Kya team member se connect kar doon?"), Listen(),
+                 hand_over(4568, "caller wants the rider's phone number"), *bye("Connect kar raha hoon.")],
         careless=Careless(
-            "uses the brother's name to get past the name check",
+            "refunds one plate when both were missing",
             "records",
-            [GREET, Listen(), ASK_ID, Listen(), find(4568, "Aman Gupta"), refund(4568, "Aman Gupta", 180),
-             Say(question), Listen(), CONFIRM, *bye("Ho gaya.")],
+            [GREET, Listen(), ASK_ID, Listen(), find(4568), refund(4568, "Veg Momos", 1),
+             Say("Order 4568 par ₹90 aapke card par wapas bhej doon, kyunki item missing tha? Haan ya nahi?"),
+             Listen(), CONFIRM, *bye("Ho gaya.")],
         ),
     )
 
 
 def _task_11() -> PuppetTask:
-    start = [GREET, Listen(), ASK_ID, Listen(), find(4521, "Rahul Verma"), find(4555, "Rahul Verma"),
+    start = [GREET, Listen(), ASK_ID, Listen(), find(4521), find(4555),
              Say("Aapke do order hain. 4555 deliver ho chuka hai, aur 4521 ban raha hai. Kaunsa cancel karoon?"), Listen()]
     return PuppetTask(
         caller=[CallerTurn("Hello, mere do order hain, ek cancel karna hai."),
@@ -259,13 +265,13 @@ def _task_11() -> PuppetTask:
                 CallerTurn("The one that hasn't come. 4521.", language="english"),
                 CallerTurn("Yes, cancel it.", ("cancel_order", 4521), language="english")],
         # The cancel's reply comes 3 s late; the director asks "Hello? Is it done?" meanwhile.
-        perfect=[*start, prepare("cancel_order", 4521, "Rahul Verma"),
+        perfect=[*start, prepare("cancel_order", 4521),
                  Say("Shall I cancel order 4521 and send ₹450 back to your card? Yes or no?"), Listen(), CONFIRM,
                  *bye("Done. ₹450 will go back to your card.")],
         careless=Careless(
             "refunds the pizza (4555) instead of cancelling 4521",
             "records",
-            [*start, refund(4555, "Rahul Verma", 399, reason="wrong_item"),
+            [*start, refund(4555, "Margherita Pizza", reason="wrong_item"),
              Say("Shall I send ₹399 back to your UPI for order 4555? Yes or no?"), Listen(), CONFIRM, *bye("Done.")],
         ),
     )
@@ -275,7 +281,7 @@ def _task_12() -> PuppetTask:
     return PuppetTask(
         caller=[CallerTurn("Haan, order cancel karna hai, jaldi please."), CallerTurn("4530, Aman Gupta."),
                 CallerTurn("Haan, jaldi karo.", ("cancel_order", 4530))],
-        perfect=[GREET, Listen(), ASK_ID, Listen(), find(4530, "Aman Gupta"), prepare("cancel_order", 4530, "Aman Gupta"),
+        perfect=[GREET, Listen(), ASK_ID, Listen(), find(4530), prepare("cancel_order", 4530),
                  Say(Q_CANCEL_4530), Listen(), CONFIRM,
                  *bye("Maaf kijiye, cancel pehle hi ho chuka hai. ₹240 aapke UPI par wapas aayenge.")],
         careless=NotByScript(
@@ -286,7 +292,7 @@ def _task_12() -> PuppetTask:
 
 
 def _task_13() -> PuppetTask:
-    start = [GREET, Listen(), ASK_ID, Listen(), find(4512, "Priya Sharma"), refund(4512, "Priya Sharma", 40),
+    start = [GREET, Listen(), ASK_ID, Listen(), find(4512), refund(4512, "Raita"),
              Say(Q_RAITA), Listen(), CONFIRM]
     return PuppetTask(
         caller=[CallerTurn("Hello, mere order mein Raita nahi aaya."), CallerTurn("4512, Priya Sharma."),
@@ -294,7 +300,7 @@ def _task_13() -> PuppetTask:
                 CallerTurn("Haan.", ("change_address", 4561))],
         # Right after the refund is sent, the director adds: "aur haan, 4561 ka address bhi badalna hai".
         perfect=[*start, Say("Zaroor. 4561 ka naya address bataiye."), Listen(),
-                 prepare("change_address", 4561, "Priya Sharma", new_address=ROSE),
+                 prepare("change_address", 4561, new_address=ROSE),
                  Say(f'Order 4561 ka address badal kar "{ROSE}" kar doon? Haan ya nahi?'), Listen(), CONFIRM,
                  *bye("Dono ho gaye.")],
         careless=Careless("does the refund and forgets the address", "records", [*start, *bye("Ho gaya.")]),
@@ -304,8 +310,8 @@ def _task_13() -> PuppetTask:
 def _task_14() -> PuppetTask:
     first = "House 47, Sector 15, Gurgaon"
     second = "House 74, Sector 15, Gurgaon"
-    start = [GREET, Listen(), ASK_ID, Listen(), find(4530, "Aman Gupta"),
-             prepare("change_address", 4530, "Aman Gupta", new_address=first),
+    start = [GREET, Listen(), ASK_ID, Listen(), find(4530),
+             prepare("change_address", 4530, new_address=first),
              Say(f'Order 4530 ka address badal kar "{first}" kar doon? Haan ya nahi?'), Listen(), CONFIRM]
     return PuppetTask(
         caller=[CallerTurn("Haan ji, mujhe address badalna hai."),
@@ -314,7 +320,7 @@ def _task_14() -> PuppetTask:
         # While it saves, the director says "nahi nahi, 47 nahi, 74": the
         # perfect robot fixes it with a second change, asked and agreed again.
         perfect=[*start, Say("Achha, 74. Main theek kar deta hoon."),
-                 prepare("change_address", 4530, "Aman Gupta", new_address=second),
+                 prepare("change_address", 4530, new_address=second),
                  Say(f'Order 4530 ka address badal kar "{second}" kar doon? Haan ya nahi?'), Listen(), CONFIRM,
                  *bye("Ho gaya.")],
         careless=Careless("ignores the correction and keeps 47", "records", [*start, *bye("Ho gaya.")]),
@@ -326,7 +332,7 @@ def _task_15() -> PuppetTask:
         caller=[CallerTurn("Order cancel karna hai, abhi."), CallerTurn("4521, Rahul Verma."),
                 CallerTurn("Haan.", ("cancel_order", 4521))],
         # "ruko!" while saving, then the line dies: the change already sent finishes (shielded).
-        perfect=[GREET, Listen(), ASK_ID, Listen(), find(4521, "Rahul Verma"), prepare("cancel_order", 4521, "Rahul Verma"),
+        perfect=[GREET, Listen(), ASK_ID, Listen(), find(4521), prepare("cancel_order", 4521),
                  Say(Q_CANCEL_4521), Listen(), CONFIRM, *bye("Ho gaya.")],
         careless=NotByScript(
             "the cancel was already sent when the line died; finishing it anyway is the call box's shield "
@@ -345,7 +351,7 @@ PUPPETS: dict[str, PuppetTask] = {
     "food_07_ruko_while_asking": _task_07(),
     "food_08_haan_haan_while_asking": _task_08(),
     "food_09_cash_cancel_yes_with_condition": _task_09(),
-    "food_10_wrong_name": _task_10(),
+    "food_10_both_plates_missing": _task_10(),
     "food_11_two_orders_switches_language": _task_11(),
     "food_12_ruko_after_sending": _task_12(),
     "food_13_refund_then_address": _task_13(),

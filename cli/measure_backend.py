@@ -55,9 +55,9 @@ async def main() -> None:
             backend = Backend(db, pack, WallClock(settings.started_at_wall), settings)
             for _ in range(CALLS):
                 start = time.perf_counter()
-                await backend.call_tool("find_order", {"order_no": 4521, "customer_name": "Rahul"})
+                await backend.call_tool("find_order", {"order_no": 4521})
                 tool_ms.append((time.perf_counter() - start) * 1000)
-            reply = await backend.call_tool("find_order", {"order_no": 4521, "customer_name": "Rahul"})
+            reply = await backend.call_tool("find_order", {"order_no": 4521})
 
         for mode, ticket_check in (("plain", False), ("safe", True)):
             tools = build_catalog(pack.actions(), CallSettings("x", pack.name, mode, ticket_check))

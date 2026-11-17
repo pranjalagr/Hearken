@@ -12,13 +12,6 @@ def order(status="preparing", method="card", amount=45000, no=4521):
     return Order(no, "Rahul Verma", amount, method, "Flat 12B, Noida", status)
 
 
-def test_name_check_accepts_full_or_first_name_in_any_case():
-    assert rules.name_matches("Rahul Verma", "rahul  VERMA")
-    assert rules.name_matches("Rahul Verma", "Rahul")
-    assert not rules.name_matches("Rahul Verma", "Verma")
-    assert not rules.name_matches("Rahul Verma", "Priya")
-
-
 def test_cancel_only_before_out_for_delivery():
     assert rules.can_cancel(order("placed")).allowed
     assert rules.can_cancel(order("preparing")).allowed

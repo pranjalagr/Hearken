@@ -37,7 +37,7 @@ def test_confirm_asks_for_a_ticket_only_when_the_ticket_check_is_on():
 def test_schema_marks_required_inputs_and_allowed_values():
     refund = next(t for t in build_catalog(FoodPack().actions(), CallSettings("c", "food")) if t.name == "prepare_refund_order")
     schema = refund.input_schema
-    assert schema["required"] == ["order_no", "customer_name", "amount_rupees", "reason"]
+    assert schema["required"] == ["order_no", "item", "reason"]
     assert schema["properties"]["reason"]["enum"] == ["missing_item", "wrong_item", "damaged_item"]
     assert schema["additionalProperties"] is False
 

@@ -23,17 +23,6 @@ BEFORE_DISPATCH = (PLACED, PREPARING)
 PREPAID = ("upi", "card")
 
 
-def name_matches(name_on_order: str, said: str) -> bool:
-    """Decision 2: the caller gives the order number + the name on the order.
-
-    A first name alone is accepted, because callers often say only that.
-    Case and extra spaces are ignored, because speech-to-text varies them.
-    """
-    on_order = " ".join(name_on_order.lower().split())
-    said = " ".join(said.lower().split())
-    return said == on_order or said == on_order.split()[0]
-
-
 def can_cancel(order: Order) -> Check:
     n = order.order_no
     if order.status == CANCELLED:

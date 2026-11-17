@@ -12,7 +12,6 @@ from typing import Any
 
 from engine.contract.action import (
     INTEGER,
-    NUMBER,
     STRING,
     Action,
     ActionContext,
@@ -24,20 +23,42 @@ from engine.contract.action import (
 from engine.storage.database import Tx
 from packs.food import order_store as store
 from packs.food import rules
-from packs.food.money import format_rupees, rupees_to_paise, spoken_amount
+from packs.food.money import format_rupees, spoken_amount
 
 ORDER_NO = Input(INTEGER, "The 4-digit order number.")
-CUSTOMER_NAME = Input(STRING, "The name the caller gives; it must match the name on the order.")
 
 
 async def identify(tx: Tx, inputs: dict[str, Any]) -> tuple[store.Order | None, Check]:
-    """Find the order and make sure the caller is its owner (decision 2)."""
+    """Find the order. The order number alone identifies it (decision 2, changed 17 Nov 2026:
+    no name is asked or checked). A miss names the wrong input, so an agent can ask again
+    without reading the words (decision 27)."""
     order = await store.load_order(tx, inputs["order_no"])
     if order is None:
-        return None, Check.refuse(f"No order {inputs['order_no']} found. Ask the caller to repeat the number.")
-    if not rules.name_matches(order.customer_name, inputs["customer_name"]):
-        return None, Check.refuse(f"The name does not match order {order.order_no}. Ask for the name on the order.")
+        return None, Check.refuse(f"No order {inputs['order_no']} found. Ask the caller to repeat the number.",
+                                 wrong_input="order_no")
     return order, Check.ok()
+
+
+async def _item_refund(tx: Tx, inputs: dict[str, Any]) -> tuple[store.Order, dict[str, Any] | None, int, Check]:
+    """The order, its line for the item, and the refund in paise: price times how many.
+
+    Decided 17 Nov 2026: the agent names the item from the order; code fills its price, so
+    an AI never writes an amount (on 16 Nov 2026 a Thinker made up Rs 50 in food_03). One
+    place for this sum, so the log, the yes-question and the refund always agree."""
+    order, verdict = await identify(tx, inputs)
+    if order is None:
+        return order, None, 0, verdict
+    wanted = " ".join(str(inputs["item"]).lower().split())
+    line = next((it for it in await store.load_items(tx, order.order_no)
+                 if " ".join(it["item"].lower().split()) == wanted), None)
+    if line is None:
+        return order, None, 0, Check.refuse(f"Order {order.order_no} has no item {inputs['item']!r}.",
+                                            wrong_input="item")
+    quantity = inputs.get("quantity") or line["quantity"]  # left out: all of that item
+    if not 0 < quantity <= line["quantity"]:
+        return order, line, 0, Check.refuse(
+            f"Order {order.order_no} has {line['quantity']} x {line['item']}.", wrong_input="quantity")
+    return order, line, line["price_paise"] * quantity, Check.ok()
 
 
 async def _cancel_refund(tx: Tx, inputs: dict[str, Any]) -> tuple[store.Order, int]:
@@ -53,7 +74,7 @@ async def _cancel_refund(tx: Tx, inputs: dict[str, Any]) -> tuple[store.Order, i
 class FindOrder(Action):
     name = "find_order"
     description = "Look up an order: status, items, amount, payment method and address."
-    inputs = {"order_no": ORDER_NO, "customer_name": CUSTOMER_NAME}
+    inputs = {"order_no": ORDER_NO}
 
     async def check(self, tx: Tx, inputs: dict[str, Any]) -> Check:
         _, verdict = await identify(tx, inputs)
@@ -81,7 +102,6 @@ class ChangeAddress(Action):
     risky = True
     inputs = {
         "order_no": ORDER_NO,
-        "customer_name": CUSTOMER_NAME,
         "new_address": Input(STRING, "The full new delivery address."),
     }
     same_request_inputs = ("order_no", "new_address")
@@ -112,7 +132,7 @@ class CancelOrder(Action):
     name = "cancel_order"
     description = "Cancel an order that has not left yet. A prepaid order is refunded automatically."
     risky = True
-    inputs = {"order_no": ORDER_NO, "customer_name": CUSTOMER_NAME}
+    inputs = {"order_no": ORDER_NO}
     same_request_inputs = ("order_no",)
 
     async def check(self, tx: Tx, inputs: dict[str, Any]) -> Check:
@@ -160,8 +180,9 @@ class RefundOrder(Action):
     risky = True
     inputs = {
         "order_no": ORDER_NO,
-        "customer_name": CUSTOMER_NAME,
-        "amount_rupees": Input(NUMBER, "How much to refund, in rupees, e.g. 40 or 120.50."),
+        "item": Input(STRING, "The item that went wrong, exactly as named in the order."),
+        "quantity": Input(INTEGER, "How many of that item, if the caller says; leave out for all of them.",
+                          required=False),
         "reason": Input(STRING, "What went wrong.", choices=("missing_item", "wrong_item", "damaged_item")),
         "to_method": Input(
             STRING,
@@ -171,42 +192,37 @@ class RefundOrder(Action):
         ),
     }
     # Not the reason: if a retry changed the reason, the same money must still
-    # not go out twice. Two equal refunds on one order go to a human instead.
-    same_request_inputs = ("order_no", "amount_rupees")
+    # not go out twice. Two refunds for one item on one order go to a human instead.
+    same_request_inputs = ("order_no", "item")
 
     async def check(self, tx: Tx, inputs: dict[str, Any]) -> Check:
-        order, verdict = await identify(tx, inputs)
-        if order is None:
+        order, _, amount, verdict = await _item_refund(tx, inputs)
+        if not verdict.allowed:
             return verdict
-        amount = rupees_to_paise(inputs["amount_rupees"])
-        if amount is None:
-            return Check.refuse("The amount must be in rupees, like 40 or 120.50.")
         refunded = await store.refunded_so_far(tx, order.order_no)
         return rules.can_refund(order, refunded, amount, inputs.get("to_method"))
 
     async def summarize(self, tx: Tx, inputs: dict[str, Any]) -> str:
-        order = await store.load_order(tx, inputs["order_no"])
-        amount = format_rupees(rupees_to_paise(inputs["amount_rupees"]))
+        order, _, amount, _ = await _item_refund(tx, inputs)
         problem = inputs["reason"].replace("_", " ")
-        return f"refund {amount} on order {order.order_no} to {order.payment_method} for a {problem}"
+        return f"refund {format_rupees(amount)} on order {order.order_no} to {order.payment_method} for a {problem}"
 
     async def spoken_question(self, tx: Tx, inputs: dict[str, Any]) -> SpokenQuestion:
-        order = await store.load_order(tx, inputs["order_no"])
+        order, _, amount, _ = await _item_refund(tx, inputs)
         return SpokenQuestion(
             "refund",
             values={"order_no": str(order.order_no)},
             # The reason is said back too, so a refund asked for the wrong
             # problem ("wrong item" vs "missing item") gets caught by the caller.
             phrases={
-                "amount": spoken_amount(rupees_to_paise(inputs["amount_rupees"])),
+                "amount": spoken_amount(amount),
                 "payment": Phrase("payment_method", order.payment_method),
                 "reason": Phrase("refund_reason", inputs["reason"]),
             },
         )
 
     async def do(self, tx: Tx, inputs: dict[str, Any], ctx: ActionContext) -> dict[str, Any]:
-        order = await store.load_order(tx, inputs["order_no"])
-        amount = rupees_to_paise(inputs["amount_rupees"])
+        order, _, amount, _ = await _item_refund(tx, inputs)
         await store.add_refund(
             tx, order.order_no, amount, order.payment_method, inputs["reason"], ctx.token, ctx.now
         )

@@ -77,18 +77,21 @@ async def test_the_yes_questions_are_exactly_what_the_backend_says(open_call):
         assert prepared.status == "ok", prepared.message
         return {language: await kit.guard.question(prepared.data["token"], language) for language in LANGUAGES}
 
-    cancel_4521 = await asked("prepare_cancel_order", order_no=4521, customer_name="Rahul Verma")
-    cancel_4530 = await asked("prepare_cancel_order", order_no=4530, customer_name="Aman Gupta")
-    cancel_4533 = await asked("prepare_cancel_order", order_no=4533, customer_name="Neha Singh")
+    cancel_4521 = await asked("prepare_cancel_order", order_no=4521)
+    cancel_4530 = await asked("prepare_cancel_order", order_no=4530)
+    cancel_4533 = await asked("prepare_cancel_order", order_no=4533)
     refund_4512 = await asked(
-        "prepare_refund_order", order_no=4512, customer_name="Priya Sharma", amount_rupees=40, reason="missing_item"
+        "prepare_refund_order", order_no=4512, item="Raita", reason="missing_item"
     )
     move_4561 = await asked(
-        "prepare_change_address", order_no=4561, customer_name="Priya Sharma",
+        "prepare_change_address", order_no=4561,
         new_address="Flat 2C, Rose Apartments, Model Town, Ludhiana",
     )
-    paise_4512 = await asked(  # decision 10: an amount with paise
-        "prepare_refund_order", order_no=4512, customer_name="Priya Sharma", amount_rupees=120.5, reason="damaged_item"
+    # Decision 10: an amount with paise. A refund's amount is the item's price (17 Nov 2026),
+    # so the price is set; another item, so it isn't the Raita request already waiting.
+    await kit.set_item_price(4512, "Veg Biryani", 12050)
+    paise_4512 = await asked(
+        "prepare_refund_order", order_no=4512, item="Veg Biryani", reason="damaged_item"
     )
     assert LINES["F1"].text == cancel_4521["hinglish"]
     assert LINES["F2"].text == cancel_4530["hinglish"]

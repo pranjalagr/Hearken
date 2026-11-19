@@ -15,23 +15,25 @@ The same 15 practice calls, played by a pretend caller with real voices, backgro
 | | Agent A | Agent C |
 |---|---|---|
 | Design | one AI does everything | a Talker and a Thinker, as two graphs |
-| Calls counted | 15 of 15 | 13 of 15 |
-| Task success | 27% (4 of 15) | 31% (4 of 13) |
-| Harmful actions | 8 | 6 |
-| Calls with made-up numbers | 3 | 1 |
-| Reply delay, median | 3.44 s | **1.78 s** |
-| Reply delay, slowest 10% | 7.10 s | **4.06 s** |
-| Silence while a tool runs, median | 0.32 s | 0.17 s |
-| Stops on "ruko" | 1 of 1 | 1 of 1 |
-| Wrong stops on "haan" | 4 of 5 | 3 of 7 |
+| Run | 15 Nov 2026 | 19 Nov 2026 |
+| Calls counted | 15 of 15 | 15 of 15 |
+| Task success, by the scorer | 27% (4 of 15) | 47% (7 of 15) |
+| Task success, every call read by hand | not read | **67% (10 of 15)** |
+| Harmful actions, by the scorer | 8 | 4 |
+| Calls with made-up numbers | 3 | **0** |
+| Reply delay, median | 3.44 s | **1.60 s** |
+| Reply delay, slowest 10% | 7.10 s | **3.34 s** |
+| Silence while a tool runs, median | 0.32 s | 0.24 s |
+| Stops on "ruko" | 1 of 1 | 2 of 2 |
+| Wrong stops on "haan" | 4 of 5 | 4 of 7 |
 
 What this shows:
 - **Agent C answers about twice as fast.** The Talker replies at once while the Thinker works in the background, instead of one AI doing both in turn.
-- **Agent C caused fewer harmful actions and made up fewer numbers.** In Agent C code, not the AI, writes every number the caller hears.
-- **Success is still low for both.** Agent C's run found real bugs (listed under "What the lab found"), and they are fixed. A clean rerun with the fixes is the next step.
-- Two of Agent C's 15 calls didn't run: the pretend caller's daily AI budget ran out.
+- **Agent C made up no numbers.** In Agent C, code, not the AI, writes every number the caller hears.
+- **The scorer is stricter than a person.** It compares text letter by letter, so 3 of its 8 failures were really fine: an address saved as "flat do C" for "Flat 2C", a hand-over the caller insisted on, and a call where the pretend caller skipped its own step. Its 4 harmful actions were 3 hand-overs to a person and that address; none moved money or changed an order wrongly.
+- **The 5 real failures:** 3 AI mistakes (an order number said as Hindi pairs, "paintalis saintalis", not taken as the order number; "phir se bataiye", say it again, read as "stop"; a yes with a second request read as "other"), and 2 from words the speech-to-text made up out of background noise, made worse by a bug in the Guard. They are the next fixes.
 
-Agent A: run 7, 15 Nov 2026. Agent C: run 2, 17 Nov 2026 (some fixes landed during that run).
+Agent A: run 7, 15 Nov 2026. Agent C: 19 Nov 2026, run in two parts (a speech-to-text key ran out of credit after 2 calls). The lab got stricter between the two runs: the pretend caller now says no when the robot reads back a wrong address.
 
 ## The three agents
 
@@ -179,7 +181,7 @@ The rule behind the design: **the AI understands, code acts.** A prompt rule can
 | Which number words the caller said | Turns them into digits and checks they were said in order |
 | Which request it is, which tool, what is missing | Presses every tool, with the checked order number |
 | What a refusal means, in plain words | Copies every backend answer into the notebook, as it came |
-| Is "haan, lekin..." a yes? (one word: yes, no, stop, unclear, other) | Takes the yes only after the question was heard to the end, then confirms |
+| Is "haan, lekin..." a yes? (one word: yes, no, stop, unclear, other, changed) | Takes the yes only after the question was heard to the end, then confirms |
 | What to say in a free reply | Fills every number and amount; replaces a line with a number nobody gave |
 
 Rules that live in code because the AI broke them as prompt rules:
@@ -236,11 +238,13 @@ The numbers above come from a lab built to be fair and hard to fool.
 
 | What | Result |
 |---|---|
-| Automated tests | 1356 passing |
+| Automated tests | 1412 passing; 2 failing, both known: the number reader's hardest cases ("haan" inside a number, "saath" as 60 or "with") |
 | Lab health check | every light green: tasks, scorer, clock, no leaks, caller timing |
 | Interruptions the pretend caller lands at the exact moment | 5 of 5 |
 | Speech-to-text chosen by test (76 robot-voice clips) | Sarvam 68 right, Deepgram 58 |
 | Number finder: when it says a number, it is right | 98% (309 of 316 cases), usually in 0.27 s |
+| Order numbers heard right by speech-to-text (226 in the hard ears test) | 197 (87%); most misses are the second word of a Hindi pair, like "tees" (30) |
+| Address check (TypeSafe Jev) on 52 addresses: real ones from past calls, plus wrong and right versions made from them | catches 30 of 33 wrong ones; stops 4 of 19 right ones, and the caller is asked again |
 | "haan" vs "ruko" model, on a voice it never heard | 0.91 (1 is perfect, 0.5 is guessing) |
 | LangGraph's own time per graph step | 0.3 ms |
 | 20 calls at once on one laptop | no freeze of the event loop over 100 ms |
@@ -265,12 +269,14 @@ Watching every call line by line found problems no unit test showed. Each one is
 |---|---|
 | Voice pipeline | Pipecat |
 | Agent graphs | LangGraph |
-| AI (talking, thinking, the yes judge) | Gemini Flash-Lite |
+| AI, Agent C (talking and thinking) | gpt-oss-120b on Groq |
+| AI, the yes judge | qwen3.8-27b on Groq |
+| AI, the address check | TypeSafe Jev |
 | Speech-to-text, voice, number finder | Sarvam (saaras v3, bulbul v4, sarvam-105b) |
 | "haan" vs "ruko" model | own model (ONNX), trained on machine voices and real Hindi phone calls |
 | Backend and tools | Python, SQLite, MCP |
 | Pretend caller | Groq (brain), Smallest.ai (voices) |
-| Tests | pytest, 1356 tests |
+| Tests | pytest, 1416 tests |
 
 ## Roadmap
 
@@ -278,7 +284,8 @@ Watching every call line by line found problems no unit test showed. Each one is
 - [x] Test lab: pretend caller, director, scorer, AI judge, health check
 - [x] Agent A (one AI)
 - [x] Agent C on two LangGraph graphs, with the Guard
-- [ ] Agent C clean rerun with every fix from run 2
+- [x] Agent C clean rerun with every fix from run 2 (19 Nov 2026: 10 of 15 read by hand)
+- [ ] Agent C: fix the 3 AI mistakes and the Guard bug that rerun found
 - [ ] Agent B in the lab
 - [ ] Agents A, B and C side by side, then the unseen exam tasks
 - [ ] A real phone line (Asterisk gateway)
@@ -289,7 +296,7 @@ Watching every call line by line found problems no unit test showed. Each one is
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-pytest                                                # the 1356 tests, no keys needed
+pytest                                                # the 1416 tests, no keys needed
 python -m cli.lab_run health --quick                  # check the lab before trusting it
 python -m cli.lab_run run --robots agent:c --caller chain   # real calls: needs keys in .env
 ```

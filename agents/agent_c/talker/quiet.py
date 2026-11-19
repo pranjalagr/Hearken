@@ -35,11 +35,14 @@ class QuietSettings:
     every_s: float
     hello_s: float
     line_gone_s: float
+    # The first waiting line when the robot, not the caller, spoke last: the caller may be
+    # about to answer it (17 Nov 2026, run 5, food_04; see WaitingLines.tick).
+    after_robot_s: float = 3.0
 
     @classmethod
     def from_settings(cls, waiting: dict[str, Any], silent: dict[str, Any]) -> QuietSettings:
         return cls(float(waiting["first_s"]), float(waiting["every_s"]), float(silent["hello_s"]),
-                   float(silent["line_gone_s"]))
+                   float(silent["line_gone_s"]), float(waiting["after_robot_s"]))
 
 
 class WaitingLines:
@@ -55,9 +58,14 @@ class WaitingLines:
         self._quiet_since: float | None = None
         self._last_at: float | None = None  # when the last waiting line was started
         self._last: str | None = None
+        self._robot_spoke_last = False  # who spoke last: the robot, or the caller
         self.played = 0
 
     async def tick(self, now: float, moment: Moment) -> None:
+        if moment.caller_speaking:
+            self._robot_spoke_last = False
+        elif moment.robot_speaking:
+            self._robot_spoke_last = True
         if not moment.working or moment.caller_speaking or moment.guard_asking or moment.robot_speaking:
             # Only robot silence while the back office works counts, and never over the
             # caller or the yes-question.
@@ -66,7 +74,12 @@ class WaitingLines:
         if self._quiet_since is None:
             self._quiet_since = now
             return
-        if now - self._quiet_since < self._settings.first_s:
+        # After the caller spoke, a filler comes quickly (decision 11: ~1 s). After the
+        # robot's own line, the caller may be answering it: 17 Nov 2026, run 5, food_04, the
+        # lab's caller needs ~1.5 s of quiet before it speaks, the 1 s filler always came
+        # first, and its answers were thrown away until the call broke.
+        wait_s = self._settings.after_robot_s if self._robot_spoke_last else self._settings.first_s
+        if now - self._quiet_since < wait_s:
             return
         if self._last_at is not None and now - self._last_at < self._settings.every_s:
             return

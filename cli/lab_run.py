@@ -70,10 +70,21 @@ def _agent_c(name: str) -> AgentRobot:
     import yaml
 
     data = yaml.safe_load((AGENTS / "agent_c" / "settings.yaml").read_text(encoding="utf-8"))
-    # "brain" is the model the lab's key check asks before a run; the Talker, Thinker
-    # and Guard judge all use Flash-Lite on the free tier (decision 2, 15 Nov 2026).
-    models = {"brain": data["talker"]["model"], "talker": data["talker"]["model"], "thinker": data["thinker"]["model"],
-              "judge": data["guard"]["judge_model"], "ears": data["ears"]["model"],
+    talker, thinker, guard = data["talker"], data["thinker"], data["guard"]
+    # "brain" is the Gemini model the lab's key check asks before a run. Since 18 Nov 2026 a
+    # part may run on Groq (settings.yaml "provider"): the check then asks a Gemini model a part
+    # still uses, or settings.yaml's gemini_check_model, never a Groq model name (that run's
+    # key check got 404 from Google on all 6 keys for "qwen/qwen3.8-27b" and started no call).
+    on_gemini = [part for part, provider in ((talker["model"], talker.get("provider", "gemini")),
+                                             (thinker["model"], thinker.get("provider", "gemini")),
+                                             (guard["judge_model"], guard.get("judge_provider", "gemini")))
+                 if provider == "gemini"]
+    models = {"brain": on_gemini[0] if on_gemini else data["gemini_check_model"],
+              "talker": f"{talker.get('provider', 'gemini')} {talker['model']}",
+              "thinker": f"{thinker.get('provider', 'gemini')} {thinker['model']}",
+              "thinker_decide": str(thinker.get("decide_model", "")),
+              "judge": f"{guard.get('judge_provider', 'gemini')} {guard['judge_model']}", "ears": data["ears"]["model"],
+              "address_check": " ".join(str((data.get("address_check") or {}).get(k, "")) for k in ("provider", "model")).strip(),
               "voice": f"{data['voice']['model']}/{data['voice']['speaker']}"}
     # Decision 3: C runs in safe mode WITH the ticket check: only its Guard can confirm.
     return AgentRobot(name, "cli.agent_c", SAFE, ticket_check=True, models=models)

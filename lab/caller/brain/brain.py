@@ -25,7 +25,7 @@ import yaml
 
 from common.wire.protocol import KEYPAD
 from engine.tasks.caller_spec import NUMBER_STYLES, CallerSpec
-from lab.caller.mouth.number_words import hindi_number, say_digits
+from lab.caller.mouth.number_words import HINDI_0_TO_99, hindi_number, say_digits
 from lab.judge.judge import strict_form
 from lab.week1.flash_lite_check import with_retries
 
@@ -382,6 +382,85 @@ def _call_so_far(history: list[Turn]) -> str:
 SAFE_LINE = Thought("Ek minute, phir se bataiye.", "एक मिनट, फिर से बताइए।")
 
 
+# ---- a yes-question with the wrong address: the caller says no (19 Nov 2026) --------------
+# On 18 Nov (run agent-c-groq-4) the robot asked "address badal kar '4 5 6 1' kar doon?" and
+# "... '45 30 House 74, Sector 15, Gurgaon' ...", mixing the order number into the address, and
+# the caller's model said "Haan" both times. A real person would say no. The owner's rule: code
+# reads the address in the question and compares it with the caller's own; spelling may differ,
+# but the numbers must be the same, and nothing extra. A wrong one gets "no" and the right one.
+
+# The address in an address yes-question as the caller's ears write it: "Order chaar paanch
+# chhah ek ka address badalkar <address> kar doon" (18 Nov 2026).
+_ADDRESS_ASKED = re.compile(r"badal\s*kar\s+(.+?)\s+kar\s*d", re.IGNORECASE)
+_NUMBER_WORDS = {_loose(word): n for n, word in enumerate(HINDI_0_TO_99)} | {
+    word: n for n, word in enumerate(("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"))}
+_WORDS_ALIKE = 0.75  # the address's other words, spelling aside ("Ludhiyana" for "Ludhiana")
+_LETTER = re.compile(r"[a-z]+")
+
+
+def address_parts(text: str) -> tuple[str, str]:
+    """An address as (its numbers in order, joined; its other words), loosely. Number words
+    become digits ("chauhattar" -> 74, "do" -> 2): the ears write numbers as words, and a
+    voice says "2C" as "do C"."""
+    from difflib import get_close_matches
+
+    digits, words = [], []
+    for token in _loose(text).split():
+        number, letters = re.match(r"(\d*)(.*)", token).groups()
+        if number:
+            digits.append(number)
+            words += _LETTER.findall(letters)
+        elif token in _NUMBER_WORDS:
+            digits.append(str(_NUMBER_WORDS[token]))
+        elif len(token) > 4 and (near := get_close_matches(token, list(_NUMBER_WORDS), n=1, cutoff=0.8)):
+            # Ears spell number words their own way ("paintalis" for "paintaalees"). Short
+            # words must match exactly: "do" and "das" are too close to real words.
+            digits.append(str(_NUMBER_WORDS[near[0]]))
+        else:
+            words.append(token)
+    return "".join(digits), " ".join(words)
+
+
+def same_address(a: str, b: str) -> bool:
+    from difflib import SequenceMatcher
+
+    (digits_a, words_a), (digits_b, words_b) = address_parts(a), address_parts(b)
+    return digits_a == digits_b and SequenceMatcher(None, words_a, words_b).ratio() >= _WORDS_ALIKE
+
+
+def wrong_address_asked(asked: str, spec: CallerSpec, own_lines: Collection[str] = ()) -> str | None:
+    """The address a yes-question asks about, if it is not the caller's: None when it matches,
+    or when this is no address question or the address can't be found in it. An address the
+    caller itself said earlier counts as its own: food_14 says "House 47" on purpose first."""
+    mine = str(spec.facts.get("new_address") or "")
+    found = _ADDRESS_ASKED.search(asked)
+    if not mine or asked_action(asked) != "change_address" or not found:
+        return None
+    heard = found.group(1)
+    _, my_words = address_parts(mine)
+    # Own lines that state an address (they share its words), not "4 5 6 1" said as the order number.
+    said = [line for line in own_lines if len(set(address_parts(line)[1].split()) & set(my_words.split())) >= 2]
+    if any(same_address(heard, address) for address in (mine, *said)):
+        return None
+    return heard
+
+
+def says_yes(thought: Thought) -> bool:
+    return bool(thought.agrees) or (_SAYS_YES.search(thought.line) is not None
+                                    and _SAYS_NO_FIRST.search(thought.line) is None
+                                    and _NOT_A_CLEAR_YES.search(thought.line) is None)
+
+
+def wrong_address_no(spec: CallerSpec) -> Thought:
+    """The fixed "no" when the model still says yes to a wrong address after being told."""
+    address = str(spec.facts["new_address"])
+    if spec.language.startswith("mostly_english"):
+        line = f"No, that address is wrong. The right address is {address}."
+        return Thought(line, line, language="english")
+    return Thought(f"Nahi, yeh address galat hai. Sahi address hai {address}.",
+                   f"नहीं, यह एड्रेस गलत है। सही एड्रेस है {address}.")
+
+
 @dataclass
 class Brain:
     spec: CallerSpec
@@ -406,6 +485,8 @@ class Brain:
         messages = [{"role": "user", "content": _call_so_far(history)}]
         system = self._system(frozenset(trick for trick, sign in TRICK_DONE.items() if any(sign.search(line) for line in said)))
         notes: list[str] = []
+        asked = history[-1].text if history and history[-1].speaker == "robot" else ""
+        wrong_address = wrong_address_asked(asked, self.spec, said)
         for _ in range(CHECK_TRIES):
             try:
                 thought = read_thought(await self.ask(system, messages))
@@ -413,10 +494,15 @@ class Brain:
                 notes.append(f"bad answer: {exc}")
                 continue
             problems = problems_with(thought, self.spec, heard, may_misstate, said)
+            if wrong_address is not None and says_yes(thought):
+                problems.append(f"the robot asks about the address {wrong_address!r}, which is not yours "
+                                f"({self.spec.facts['new_address']}): say no, and give your right address")
             if not problems:
-                asked = history[-1].text if history and history[-1].speaker == "robot" else ""
                 settled = settle_yes(replace(thought, problems=tuple(notes)), asked, order_numbers(self.spec))
                 return settle_goodbye(settled, asked)
             notes += problems
             messages = [*messages, {"role": "user", "content": f"(Note to the actor, not from the caller: {problems[0]}. Answer again.)"}]
+        if wrong_address is not None:
+            # Still a yes to the wrong address after being told: code says the no itself.
+            return replace(wrong_address_no(self.spec), problems=tuple(notes))
         return Thought(SAFE_LINE.line, SAFE_LINE.hindi_letters, problems=tuple(notes))

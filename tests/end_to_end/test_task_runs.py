@@ -179,6 +179,31 @@ async def test_a_new_row_nobody_expected_fails(open_call):
     assert verdict.problems == [f"unexpected change: handoffs added: {verdict.changes[-1].after}"]
 
 
+async def test_an_allowed_row_may_be_added_and_need_not_be(open_call):
+    # 19 Nov 2026, the owner's choice: food_02's hand-over after the caller insists is a right
+    # call, but not every caller insists. `allow` lets it happen without requiring it; any other
+    # extra row still fails.
+    from dataclasses import replace
+
+    from engine.tasks.task_file import Allowed
+
+    base = TASKS["food_01_cancel_prepaid"]
+    task = replace(base, allow=[Allowed("handoffs", {"order_no": 4521})])
+    steps, _ = script_for(base.id, "perfect")
+    kit = await open_call(FoodPack(), task=task)
+    before = await snapshot(kit)
+    await play(kit, steps + [UseTool("hand_over_to_human", {"reason": "the caller insists", "order_no": 4521})])
+    assert (await checked(kit, task, before)).problems == []  # added: fine
+    kit = await open_call(FoodPack(), task=task)
+    before = await snapshot(kit)
+    await play(kit, steps)
+    assert (await checked(kit, task, before)).problems == []  # not added: also fine
+    kit = await open_call(FoodPack(), task=task)
+    before = await snapshot(kit)
+    await play(kit, steps + [UseTool("hand_over_to_human", {"reason": "wrong order", "order_no": 4530})])
+    assert (await checked(kit, task, before)).problems != []  # another order's hand-over: still fails
+
+
 async def test_a_task_refuses_a_mode_it_is_not_meant_for(open_call):
     with pytest.raises(ValueError, match="not meant for plain mode"):
         await open_call(FoodPack(), mode="plain", task=TASKS["food_02_cancel_raced_by_dispatch"])

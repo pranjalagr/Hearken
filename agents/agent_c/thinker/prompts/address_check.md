@@ -1,0 +1,1 @@
+The address the robot wrote down is the new delivery address the caller gave: the same house or flat number and the same place names, with nothing left out and nothing added (the order number is not part of an address). Spelling may differ, and numbers may be written as words.

@@ -8,7 +8,8 @@ import pytest
 
 from agents.agent_c.call_job import CallJob
 from agents.agent_c.guard.guard import DONE, STOPPED, Guard, GuardSettings
-from agents.agent_c.guard.judge import NO, OTHER, STOP, UNCLEAR, YES, TimedJudge, read_label, word_list_label
+from agents.agent_c.guard.judge import (CHANGED, NO, OTHER, STOP, UNCLEAR, YES, TimedJudge, read_label,
+                                        word_list_label)
 from agents.agent_c.notebook import NEED_YES, RESULT, YES_ANSWER, Notebook
 from agents.agent_c.robot import WORDS
 from agents.agent_c.talker.language import StickyLanguage
@@ -47,7 +48,7 @@ class FakeJudge:
 class Rig:
     """One call's Guard on a real backend, with a fake voice and wire."""
 
-    def __init__(self, kit, judge):
+    def __init__(self, kit, judge, settings=SETTINGS):
         self.kit = kit
         self.book = Notebook(200)
         self.desk = CallJob()  # the job's version and its changes in flight (17 Nov 2026)
@@ -66,7 +67,7 @@ class Rig:
             self.handed_over.append(why)
 
         self.guard = Guard(kit.guard, BackendTools(kit.backend), self.box, self.book, self.desk, judge,
-                           SpokenWords.from_yaml(WORDS), StickyLanguage(4), say, send_mark, SETTINGS,
+                           SpokenWords.from_yaml(WORDS), StickyLanguage(4), say, send_mark, settings,
                            Diary("c1", self.sink), hand_over=hand_over)
 
     async def prepare(self):
@@ -106,6 +107,21 @@ async def test_a_real_yes_after_the_question_played_confirms_and_the_result_is_t
     assert rig.book.last((YES_ANSWER,)).text == "yes: haan kar do"
     moment = [r for r in rig.sink.records if r.get("what") == "yes moment"][0]
     assert (moment["label"], moment["early"], moment["played_ms"], moment["start_ms"]) == (YES, False, 5000, 5100)
+
+
+async def test_the_result_note_carries_the_backends_own_answer(open_call):
+    # 18 Nov 2026, food_01: the result note said only "cancel_order: done"; the ₹450 refund the
+    # cancel made was thrown away, so the caller never heard it and "decide" said no tool could
+    # check it. Now the backend's answer is copied, in the note's data and its words.
+    kit = await open_call(FoodPack())
+    rig = Rig(kit, FakeJudge(YES))
+    await rig.prepare()
+    await rig.question_played(at_ms=5000)
+    await rig.caller_says("haan kar do", started_ms=5100)
+    [result] = rig.results()
+    assert result.data["backend"]["refund"].startswith("₹")  # 4521 was paid by card: refunded
+    assert result.data["backend"]["status"] == "cancelled"
+    assert result.text.startswith("cancel_order: done, ") and f"refund {result.data['backend']['refund']}" in result.text
 
 
 async def test_haan_haan_while_the_robot_is_still_asking_never_counts(open_call):
@@ -207,11 +223,93 @@ async def test_a_question_cut_off_by_the_caller_is_asked_again(open_call):
     assert len(rig.said) == 2 and rig.marks == []
 
 
+async def test_a_caller_who_changes_the_request_closes_the_question_and_nothing_is_saved(open_call):
+    # 18 Nov 2026 (the owner's choice): a correction ("Flat 2C" when the question said "Flat do
+    # si") makes the old question wrong. "other" would ask it again after reask_wait_s, and a
+    # "haan" then would save the wrong thing. "changed" closes it: no re-ask, no confirm, no
+    # result note (the Thinker would read a stale one at its next question).
+    kit = await open_call(FoodPack())
+    rig = Rig(kit, FakeJudge(CHANGED))
+    await rig.prepare()
+    await rig.question_played()
+    asked = len(rig.said)
+    # No word-list word in it ("nahi", "mat"...): those stop at once, before the judge.
+    await rig.caller_says("cancel chhodo, address badalna hai", started_ms=5200)
+    await asyncio.sleep(0.2)  # well past reask_wait_s (0.05 s)
+    assert rig.guard.moment is None and len(rig.said) == asked  # never asked again
+    assert rig.book.last((YES_ANSWER,)).text.startswith("changed:")
+    assert rig.results() == [] and await rig.order_status() == "preparing"
+    assert [r for r in rig.sink.records if r.get("what") == "yes moment changed"]
+
+
+HOLD = GuardSettings(reask_wait_s=0.05, vad_start_s=0.2, stop_words=STOP_WORDS, yes_hold_s=0.3, held_wait_s=0.4)
+
+
+async def test_a_yes_the_caller_talks_on_after_waits_and_is_judged_with_the_rest(open_call):
+    # 18 Nov 2026, food_04: "Haan, sahi hai." was confirmed while the caller went on "... Flat
+    # 2C, Rose Apartments", correcting the question. Now a yes counts only if the caller stays
+    # quiet after it; here they talk on, so the whole sentence is judged as one answer.
+    kit = await open_call(FoodPack())
+    judge = FakeJudge(YES, CHANGED)
+    rig = Rig(kit, judge, HOLD)
+    await rig.prepare()
+    await rig.question_played()
+    await rig.caller_says("Haan, sahi hai.", started_ms=5200)
+    rig.guard.turn_began(7000)  # the caller talks on within the hold
+    await asyncio.sleep(0.4)  # past the hold: the yes was not used
+    assert await rig.order_status() == "preparing" and rig.guard.moment.held == "Haan, sahi hai."
+    rig.guard.turn_finished("Flat 2C, Rose Apartments")
+    await asyncio.sleep(0.1)
+    assert judge.asked[-1] == "Haan, sahi hai. Flat 2C, Rose Apartments"  # one answer, judged whole
+    assert rig.guard.moment is None and rig.results() == [] and await rig.order_status() == "preparing"
+    moment = [r for r in rig.sink.records if r.get("what") == "yes moment"][-1]
+    assert moment["start_ms"] == 5200  # counted from the yes's own start (decision 22's check)
+
+
+async def test_a_yes_followed_by_quiet_is_confirmed_once_the_hold_has_passed(open_call):
+    kit = await open_call(FoodPack())
+    rig = Rig(kit, FakeJudge(YES), HOLD)
+    await rig.prepare()
+    await rig.question_played()
+    await rig.caller_says("haan kar do", started_ms=5200)
+    assert await rig.order_status() == "preparing"  # still within the hold
+    await asyncio.sleep(0.4)
+    assert await rig.order_status() == "cancelled"
+
+
+async def test_a_cough_after_a_yes_keeps_the_yes(open_call):
+    # The detector heard a sound after the yes but the turn ended with no words: the yes is
+    # judged again on its own, and with quiet after it, it counts.
+    kit = await open_call(FoodPack())
+    rig = Rig(kit, FakeJudge(YES, YES), HOLD)
+    await rig.prepare()
+    await rig.question_played()
+    await rig.caller_says("haan", started_ms=5200)
+    rig.guard.turn_began(6000)
+    await asyncio.sleep(0.35)
+    rig.guard.turn_finished("")
+    await asyncio.sleep(0.45)
+    assert await rig.order_status() == "cancelled"
+
+
+async def test_a_held_yes_whose_next_turn_never_finishes_is_asked_again(open_call):
+    kit = await open_call(FoodPack())
+    rig = Rig(kit, FakeJudge(YES), HOLD)
+    await rig.prepare()
+    await rig.question_played()
+    await rig.caller_says("haan", started_ms=5200)
+    rig.guard.turn_began(6000)  # and no turn ever finishes
+    await asyncio.sleep(0.35 + 0.45)  # the hold, then held_wait_s
+    assert rig.said[-1] == "Haan ya nahi?" and rig.guard.moment.held == ""  # asked again, short
+    assert await rig.order_status() == "preparing"
+
+
 def test_the_word_list_and_the_judges_one_word():
     assert word_list_label("nahi, ruko", STOP_WORDS) == STOP
     assert word_list_label("Nahi.", STOP_WORDS) == NO
     assert word_list_label("haan theek hai", STOP_WORDS) is None
     assert (read_label(" Yes."), read_label("maybe yes"), read_label("")) == (YES, UNCLEAR, UNCLEAR)
+    assert read_label("changed") == CHANGED  # the sixth label (18 Nov 2026)
 
 
 async def test_a_slow_judge_is_unclear_never_yes_and_counts_as_a_request():

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, TypedDict
@@ -43,9 +44,11 @@ from agents.agent_c.notebook import (
     REQUEST,
     RESULT,
     YES_ANSWER,
+    YES_DROPPED,
     Note,
     Notebook,
 )
+from agents.agent_c.thinker.address_check import AddressCheck
 from agents.agent_c.thinker.brain import ToolCall
 from agents.agent_c.thinker.copy_notes import note_for_reply
 from agents.agent_c.thinker.step_brain import StepBrain
@@ -74,8 +77,25 @@ class ThinkerParts:
     menu: Sequence[ToolSpec]  # the tools the AI may choose from (the safe-mode catalog)
     version: Callable[[], int] = lambda: 1  # the job's version, for each note (decision 16)
     step_s: float = 8.0  # one AI step's time limit (decision 30)
-    retries: int = 1  # an AI step or a failed lookup is tried once more (decisions 19, 30)
+    retries: int = 1  # a failed lookup or prepare is tried once more (decision 19)
+    # An AI step is tried this many more times. Its own number since 17 Nov 2026: in run 3
+    # Gemini took 6-9.5 s per answer during a slow spell, so one more try at 8 s was not
+    # enough and 7 calls crashed. Backend tries stay at `retries`.
+    ai_retries: int = 2
+    # Why one AI try was thrown away (step, reason), for the diary. Run 3 only logged "no
+    # allowed answer", and we could not tell a slow answer from a wrong one.
+    on_try_failed: Callable[[str, str], None] = lambda step, reason: None
     same_call_limit: int = 3  # the same tool, inputs and answer this often: going round in circles
+    # How often one change may go back to "decide" because the caller spoke while it was
+    # worked out (the yes-question was dropped, 18 Nov 2026). Past it the question is asked
+    # anyway: a caller who keeps talking must not keep the robot deciding (and spending tokens).
+    redecide_limit: int = 2
+    # Is an address the AI wrote down the one the caller gave? (thinker/address_check.py, 19 Nov
+    # 2026). None: no check (no key, or a test). Which inputs it reads, and the line under which a
+    # change is not pressed, come from settings.yaml address_check.
+    check_address: AddressCheck | None = None
+    checked_inputs: tuple[str, ...] = ()
+    address_line: float = 0.5
     # The call's language, for anything the caller will hear (the plan, a question, an
     # explanation). 17 Nov 2026: without it an explanation came out in English in a Hinglish call.
     language: Callable[[], str] = lambda: "hinglish"
@@ -102,6 +122,10 @@ class JobState(TypedDict, total=False):
     after: str  # which step reads the caller's next reply
     reason: str  # why the job hands over
     pressed: dict[str, int]  # how often each (tool, inputs, answer) happened
+    last_key: str  # the newest press's key in `pressed`, taken back if its yes-question is dropped
+    decided_version: int  # the job's version when the newest "decide" began
+    redecides: int  # how often this change went back to "decide" after a dropped yes-question
+    input_sent_back: bool  # an input failed a check (the order number in it, or not the caller's address): sent back once
 
 
 class ThinkerStuck(RuntimeError):
@@ -126,10 +150,45 @@ def _write(parts: ThinkerParts, kind: str, text: str, data: dict[str, Any] | Non
     parts.notebook.add(kind, text, parts.step_version or parts.version(), data or {})
 
 
+def _as_decided(parts: ThinkerParts, state: JobState) -> None:
+    """The plan and the press finish "decide"'s thinking, so their notes carry the version
+    from when "decide" began: a caller turn said while it thought makes them old news, and
+    the Talker drops the yes-question (18 Nov 2026, food_14: "Gurgaon" came 1 s into decide,
+    and "House 74, Sector 15." alone was asked and saved). Past the re-decide limit, the
+    notes carry today's version instead, so the question is asked."""
+    if "decided_version" in state and state.get("redecides", 0) < parts.redecide_limit:
+        parts.step_version = state["decided_version"]
+
+
 def _caller_words(parts: ThinkerParts) -> list[str]:
     """Everything the caller said in this call, in order: the job note and each turn.
-    The AI always sees the whole call (decision 15)."""
-    return [note.text for note in parts.notebook.notes if note.kind in (REQUEST, CALLER)]
+    The AI always sees the whole call (decision 15). A turn that gave the order number says
+    so: 18 Nov 2026 (food_04, food_14), "decide" saw "4 5 6 1" and "45 30" with no sign they
+    answered "what's your order number?" (it never sees the robot's lines), and made them the
+    new address."""
+    number_turns = {str(note.data.get("words") or note.text) for note in parts.notebook.notes if note.kind == ORDER_NUMBER}
+    return [note.text + (NUMBER_TURN if note.kind == CALLER and note.text in number_turns else "")
+            for note in parts.notebook.notes if note.kind in (REQUEST, CALLER)]
+
+
+NUMBER_TURN = " (this turn gave the order number)"
+
+
+def _holds_order_number(inputs: Any, number: str) -> bool:
+    """Does any input of a change hold the order number, its digits one after another with at
+    most a space between ("4561", "4 5 6 1", "45 30")? Code checks what the prompt asks: on 18
+    Nov 2026 "decide" prepared new_address "4 5 6 1" and "45 30 House 74, Sector 15, Gurgaon".
+    Digits split by words ("Flat 45, Sector 30") are not the order number."""
+    if not number:
+        return False
+    pattern = re.compile(r"(?<!\d)" + r"\s?".join(number) + r"(?!\d)")
+    return any(isinstance(value, str) and pattern.search(value) for value in dict(inputs or {}).values())
+
+
+# Asked once "decide" put the order number into an input twice in a row: the caller gives the
+# detail again. Short and fixed, in the call's language (the Talker says a need-info note).
+ASK_DETAIL_AGAIN = {"hinglish": "Kripya naya address ek baar phir bataiye.",
+                    "english": "Could you please tell me the new address once more?"}
 
 
 def _note_dict(note: Note) -> dict[str, Any]:
@@ -139,22 +198,30 @@ def _note_dict(note: Note) -> dict[str, Any]:
 
 async def _think(parts: ThinkerParts, step: str, facts: dict[str, Any], exits: set[str]) -> dict[str, Any]:
     """Ask the AI one step's question. Only an answer with an allowed exit counts: anything
-    else, a timeout or an error is asked once more, then the job is stuck."""
-    for _ in range(1 + parts.retries):
+    else, a timeout or an error is asked again, then the job is stuck. Each thrown-away
+    try is logged with its reason."""
+    for _ in range(1 + parts.ai_retries):
         try:
             answer = await asyncio.wait_for(parts.brain.ask(step, facts), parts.step_s)
-        except (TimeoutError, ValueError, KeyError):
-            continue  # too slow, or not JSON: ask once more
+        except TimeoutError:
+            parts.on_try_failed(step, f"no answer within {parts.step_s} s")
+            continue
+        except (ValueError, KeyError) as error:
+            parts.on_try_failed(step, f"the answer was not JSON: {error}")
+            continue
         except Exception as error:
-            # A busy or broken service is asked once more (common/retry.py's rules). A daily
+            # A busy or broken service is asked again (common/retry.py's rules). A daily
             # limit fails at once: on 17 Nov 2026 a key's 500 free requests were used up, and
             # asking again only wastes time (the plan's rule).
-            if worth_retrying(error) and "PerDay" not in str(error):
+            # Groq says "tokens per day" (17 Nov 2026: "decide" runs on Groq too).
+            if worth_retrying(error) and "PerDay" not in str(error) and "per day" not in str(error):
+                parts.on_try_failed(step, f"service busy: {str(error)[:120]}")
                 continue
             raise ThinkerStuck(f"the AI service failed at step {step!r}: {error}") from error
         if answer.get("exit") in exits:
             parts.on_step(step, answer)  # every AI decision in the robot's diary
             return answer
+        parts.on_try_failed(step, f"exit not allowed: {str(answer)[:120]}")
     raise ThinkerStuck(f"the AI gave no allowed answer at step {step!r} (allowed: {sorted(exits)})")
 
 
@@ -220,7 +287,13 @@ async def person_check(state: JobState, config) -> JobState:
     """The AI reads one caller turn said while the number is being collected: does the
     caller want a person? (Decided 17 Nov 2026: hand over at once, from any step.)"""
     parts = _parts(config)
-    answer = await _think(parts, "person", {"caller_said": state["note"]["text"]}, {"person", "no"})
+    try:
+        answer = await _think(parts, "person", {"caller_said": state["note"]["text"]}, {"person", "no"})
+    except ThinkerStuck:
+        # A small check: if the AI can't answer it (a slow spell), the caller goes on giving
+        # their number, never a crash that ends the job (17 Nov 2026, run 3, food_10). A
+        # caller who really wants a person says so again, and every later step can hand over.
+        return {"after": "wait_number"}
     if answer["exit"] == "person":
         return {"reason": "the caller asked for a person", "after": "hand_over"}
     return {"after": "wait_number"}
@@ -237,7 +310,12 @@ async def check_number(state: JobState, config) -> JobState:
         _write(parts, CHECKED_NUMBER, number, {"digits": number, "typed": True})
         return {"number": number, "after": "find_order"}
     facts = {"reader_digits": state["note"]["data"].get("digits", ""), "caller_words": _caller_words(parts)}
-    answer = await _think(parts, "check_number", facts, {"ok", "unclear"})
+    try:
+        answer = await _think(parts, "check_number", facts, {"ok", "unclear"})
+    except ThinkerStuck:
+        # A small check: if the AI can't answer it (a slow spell), the caller is asked for the
+        # number again, never a crash that ends the job (17 Nov 2026, run 3, food_02).
+        answer = {"exit": "unclear"}
     number = str(answer.get("number", "")).strip()
     if answer["exit"] == "ok" and number.isdigit() and len(number) == NUMBER_LENGTH:
         _write(parts, CHECKED_NUMBER, number, {"digits": number})
@@ -265,6 +343,11 @@ async def decide(state: JobState, config) -> JobState:
     one of the menu's tools, ask for a missing detail, say no tool can do it, or hand
     over. It also writes its plan in words."""
     parts = _parts(config)
+    return {**await _decide(parts, state), "decided_version": parts.step_version}
+
+
+async def _decide(parts: ThinkerParts, state: JobState) -> JobState:
+    """decide's own work (decide adds the version it began at)."""
     facts = {"caller_words": _caller_words(parts), "order": state.get("order", {}), "menu": _menu(parts),
              "last_refusal": state.get("refusal", ""), "already_refused": state.get("refused", []),
              "already_done": [note.text for note in parts.notebook.notes if note.kind == RESULT],
@@ -275,6 +358,16 @@ async def decide(state: JobState, config) -> JobState:
     if exit_ == "prepare" and answer.get("tool") not in {item["tool"] for item in _menu(parts)}:
         # A tool that isn't on the menu is never pressed: treat it as "nothing can do it".
         exit_, answer = "cannot", {**answer, "reason": f"there is no tool {answer.get('tool')!r}"}
+    if exit_ == "prepare" and _holds_order_number(answer.get("inputs"), state.get("number", "")):
+        # The order number inside an input (18 Nov 2026: new_address "4 5 6 1"). Never prepared:
+        # once back to decide with the reason; a second time, the caller is asked again.
+        if not state.get("input_sent_back"):
+            reason = (f"an input held the order number {state['number']}; the order number is never part "
+                      f"of an address or any other input: use only what the caller said as that detail")
+            return {"choice": answer, "refusal": reason, "input_sent_back": True, "after": "decide"}
+        need = next(iter(dict(answer.get("inputs") or {})), "")
+        _write(parts, NEED_INFO, ASK_DETAIL_AGAIN.get(parts.language(), ASK_DETAIL_AGAIN["hinglish"]), {"need": need})
+        return {"choice": {**answer, "exit": "missing"}, "input_sent_back": False, "after": "wait_reply_decide"}
     if exit_ == "lookup":
         return {"choice": answer, "after": "complete"}
     if exit_ == "prepare":
@@ -291,6 +384,7 @@ def write_plan(state: JobState, config) -> JobState:
     """Code writes the AI's plan to the notebook before the tool is pressed. The Talker
     says it instead of the next waiting line (decision 16, 17 Nov 2026)."""
     parts = _parts(config)
+    _as_decided(parts, state)
     plan = str(state["choice"].get("plan", "")).strip()
     if plan:
         _write(parts, PLAN, plan)
@@ -302,6 +396,7 @@ async def press_tool(state: JobState, config) -> JobState:
     typed), and copies the answer. Prepared: wait for the yes. Refused because of one
     input: back to decide with the reason. Refused otherwise: explain."""
     parts = _parts(config)
+    _as_decided(parts, state)
     choice = state["choice"]
     name = str(choice["tool"])
     inputs = {**{k: v for k, v in dict(choice.get("inputs") or {}).items() if k != "order_no"},
@@ -313,6 +408,9 @@ async def press_tool(state: JobState, config) -> JobState:
     for old in state.get("refused", []):
         if old["tool"] == name and old.get("inputs") == inputs:
             return {"reason": old["reason"], "after": "explain"}
+    sent_back = await _check_address(parts, state, inputs)
+    if sent_back is not None:
+        return sent_back
     reply = await _press(parts, name, inputs)
     _copy(parts, name, inputs, reply)
     # Decision 19: the same tool, inputs and answer again and again is going round in circles.
@@ -324,26 +422,55 @@ async def press_tool(state: JobState, config) -> JobState:
     # towards "the caller still insists" (17 Nov 2026, food_12: an explanation from before
     # the cancel made the next, unrelated "can't" hand over at once).
     if reply.status == OK and name.startswith(PREPARE_PREFIX) and reply.data.get("token"):
-        return {"pressed": pressed, "refusal": "", "explained": 0, "after": "wait_yes"}
+        return {"pressed": pressed, "last_key": key, "refusal": "", "explained": 0, "input_sent_back": False,
+                "after": "wait_yes"}
     if reply.status == OK:
-        return {"pressed": pressed, "refusal": "", "explained": 0, "after": "complete"}
+        return {"pressed": pressed, "refusal": "", "explained": 0, "input_sent_back": False, "after": "complete"}
     if reply.status == REFUSED and reply.data.get("wrong_input"):
         return {"pressed": pressed, "refusal": reply.message, "after": "decide"}
     refused = [*state.get("refused", []), {"tool": name, "inputs": inputs, "reason": reply.message}]
     return {"pressed": pressed, "refused": refused, "reason": reply.message, "after": "explain"}
 
 
+async def _check_address(parts: ThinkerParts, state: JobState, inputs: dict[str, Any]) -> JobState | None:
+    """Before an address is prepared: is it the one the caller gave? (19 Nov 2026, the owner's
+    idea; thinker/address_check.py.) Under the line it is not pressed: back to decide once with
+    the reason, then the caller is asked again, the same way as the order-number check in
+    decide. Run here, after the plan was written, so the ~1 s check overlaps the plan line.
+    No answer from the check: the change goes on as before the check existed."""
+    if parts.check_address is None:
+        return None
+    for name in parts.checked_inputs:
+        value = inputs.get(name)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        probability = await parts.check_address.same_address(_caller_words(parts), value, str(state.get("number", "")))
+        if probability is None or probability >= parts.address_line:
+            continue
+        if not state.get("input_sent_back"):
+            reason = (f"the {name} {value!r} is not what the caller said (checked: {probability:.2f}); "
+                      f"use the caller's own words for the whole of it, or ask for it with \"missing\"")
+            return {"refusal": reason, "input_sent_back": True, "after": "decide"}
+        _write(parts, NEED_INFO, ASK_DETAIL_AGAIN.get(parts.language(), ASK_DETAIL_AGAIN["hinglish"]), {"need": name})
+        return {"input_sent_back": False, "after": "wait_reply_decide"}
+    return None
+
+
 def wait_yes(state: JobState, config) -> JobState:
     """Wait while the Guard asks the yes-question and takes the answer. It writes the
-    caller's answer and, once known, the result (decisions 17, 20-23)."""
-    return {"note": interrupt({"wait": [RESULT, YES_ANSWER]})}
+    caller's answer and, once known, the result (decisions 17, 20-23). Also wakes when the
+    Talker drops the question, because the caller spoke after it was worked out."""
+    return {"note": interrupt({"wait": [RESULT, YES_ANSWER, YES_DROPPED]})}
 
 
 def after_wait_yes(state: JobState) -> str:
     """The result: the change is finished, one way or another. An "other" answer ("kitna
     milega?"): the AI answers it, and the Guard asks again. A plain yes or no: keep waiting
-    for the result."""
+    for the result. A dropped question, or a caller who corrected or replaced the change
+    ("changed:", the Guard closed the question): decide again, with the caller's newest words."""
     note = state["note"]
+    if note["kind"] == YES_DROPPED or (note["kind"] == YES_ANSWER and note["text"].startswith("changed:")):
+        return "yes_dropped"
     if note["kind"] == RESULT and note["data"].get("outcome") == "refused":
         return "refused_result"
     if note["kind"] == RESULT:
@@ -351,6 +478,26 @@ def after_wait_yes(state: JobState) -> str:
     if note["text"].startswith("other:"):
         return "answer_other"
     return "wait_yes"
+
+
+def yes_dropped(state: JobState, config) -> JobState:
+    """The Talker didn't ask the yes-question: the caller spoke while it was worked out
+    (the owner's rule, 18 Nov 2026: every caller word reaches the Thinker, whatever its
+    step). Back to "decide", which reads the whole call again. The dropped press is taken
+    off the "same call again and again" count: the backend did nothing wrong, and a
+    "decide" that comes back with the same change must not look like going round in circles.
+    The unused token does nothing (prepare changes nothing; the same inputs even get the
+    same token back).
+    Also the way back when the caller corrected or replaced the change during the question
+    (the Guard's "changed:" answer, 18 Nov 2026). That is a real answer, not talking over the
+    thinking, so it doesn't count towards the re-decide limit."""
+    _parts(config)
+    pressed = dict(state.get("pressed", {}))
+    key = state.get("last_key", "")
+    if pressed.get(key):
+        pressed[key] -= 1
+    corrected = state["note"]["kind"] == YES_ANSWER
+    return {"pressed": pressed, "redecides": state.get("redecides", 0) + (0 if corrected else 1), "after": "decide"}
 
 
 def refused_result(state: JobState, config) -> JobState:
@@ -395,12 +542,13 @@ def complete(state: JobState, config) -> JobState:
     wanted a cancel."""
     parts = _parts(config)
     pending = state.get("pending", [])
+    # This change is settled: the next one gets its own re-decides.
     if pending:
         # A request said during the yes-question comes next, in the same job (decision 7).
-        return {"pending": pending[1:], "handle_now": pending[0], "after": "decide"}
+        return {"pending": pending[1:], "handle_now": pending[0], "redecides": 0, "after": "decide"}
     if state.get("choice", {}).get("exit") == "lookup":
         _write(parts, ANSWERED, "answered from the order")
-    return {"handle_now": "", "after": "wait_reply_complete"}
+    return {"handle_now": "", "redecides": 0, "after": "wait_reply_complete"}
 
 
 async def explain(state: JobState, config) -> JobState:
@@ -454,9 +602,16 @@ async def work_left(state: JobState, config) -> JobState:
     # What was already done in this call, so a "haan" or "ho gaya?" is never read as asking for
     # it again (17 Nov 2026, food_03: the refund was tried twice more after it was done).
     done = [note.text for note in parts.notebook.notes if note.kind == RESULT]
-    answer = await _think(parts, "work_left", {"robot_asked": "Anything else I can help with?",
-                                               "already_done": done, "caller_said": state["note"]["text"]},
-                          {"done", "more", "person"})
+    try:
+        answer = await _think(parts, "work_left", {"robot_asked": "Anything else I can help with?",
+                                                   "already_done": done, "caller_said": state["note"]["text"]},
+                              {"done", "more", "person"})
+    except ThinkerStuck:
+        # A small check: if the AI can't read the reply (a slow spell), the Talker asks
+        # "anything else?" again and the next reply comes back here. Never a crash after the
+        # work is done (17 Nov 2026, run 3, food_03 crashed here after its refund).
+        _write(parts, ANSWERED, "asking again: anything else?")
+        return {"after": "wait_reply_complete"}
     if answer["exit"] == "person":
         return {"reason": "the caller asked for a person", "after": "hand_over"}
     return {"after": "decide" if answer["exit"] == "more" else "done"}
@@ -487,7 +642,7 @@ def build_thinker_graph():
     """Join the steps with their allowed exits. Called once, at program start."""
     g = StateGraph(JobState)
     steps = [wait_number, person_check, check_number, find_order, decide, write_plan, press_tool, wait_yes,
-             refused_result, answer_other, complete, explain, after_explain, work_left, hand_over]
+             yes_dropped, refused_result, answer_other, complete, explain, after_explain, work_left, hand_over]
     for step in steps:
         g.add_node(step.__name__, step)
     # Three waits for the caller's reply share one step, told apart by who asked.
@@ -499,10 +654,13 @@ def build_thinker_graph():
     g.add_conditional_edges("person_check", _go, ["hand_over", "wait_number"])
     g.add_conditional_edges("check_number", _go, ["find_order", "wait_number"])
     g.add_conditional_edges("find_order", _go, ["decide", "wait_number", "explain"])
-    g.add_conditional_edges("decide", _go, ["complete", "write_plan", "wait_reply_decide", "hand_over", "explain"])
+    g.add_conditional_edges("decide", _go, ["complete", "write_plan", "wait_reply_decide", "hand_over", "explain", "decide"])
     g.add_edge("write_plan", "press_tool")
-    g.add_conditional_edges("press_tool", _go, ["wait_yes", "complete", "decide", "explain", "hand_over"])
-    g.add_conditional_edges("wait_yes", after_wait_yes, ["complete", "refused_result", "answer_other", "wait_yes"])
+    g.add_conditional_edges("press_tool", _go, ["wait_yes", "complete", "decide", "explain", "hand_over",
+                                             "wait_reply_decide"])
+    g.add_conditional_edges("wait_yes", after_wait_yes,
+                            ["complete", "refused_result", "answer_other", "wait_yes", "yes_dropped"])
+    g.add_edge("yes_dropped", "decide")
     g.add_edge("refused_result", "explain")
     g.add_edge("answer_other", "wait_yes")
     g.add_conditional_edges("complete", _go, ["decide", "wait_reply_complete"])
@@ -511,7 +669,7 @@ def build_thinker_graph():
         # The wait's own name tells where the caller's reply goes.
         g.add_conditional_edges(name, _reply_router(name), ["check_number", "decide", "after_explain", "work_left"])
     g.add_conditional_edges("after_explain", _go, ["hand_over", "decide", END])
-    g.add_conditional_edges("work_left", _go, ["hand_over", "decide", END])
+    g.add_conditional_edges("work_left", _go, ["hand_over", "decide", "wait_reply_complete", END])
     g.add_edge("hand_over", END)
     return g.compile(checkpointer=SAVER)
 

@@ -43,6 +43,17 @@ class Expectation:
 
 
 @dataclass(frozen=True)
+class Allowed:
+    """Rows a call may add or change without failing or counting as harm, and need not
+    (19 Nov 2026, the owner's choice): food_02's hand-over after the caller insists on a
+    refused cancel is a right call by the agreed rule, but not every caller insists, so
+    `expect` (which requires it) can't say it."""
+
+    table: str
+    where: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class Forbidden:
     """An action that must never really happen in this task (a refused or
     prepared-only attempt is fine; an actual change is not)."""
@@ -61,6 +72,7 @@ class Task:
     timeline: list[PlannedChange] = field(default_factory=list)
     expect: list[Expectation] = field(default_factory=list)
     forbid: list[Forbidden] = field(default_factory=list)
+    allow: list[Allowed] = field(default_factory=list)  # may happen, need not (see Allowed)
     # Required in task files. Optional here only so checker tests can build
     # a bare task in code.
     caller: CallerSpec | None = None
@@ -93,6 +105,7 @@ def load_task(path: Path) -> Task:
             timeline=[PlannedChange(**item) for item in raw.get("timeline", [])],
             expect=[Expectation(**item) for item in raw.get("expect", [])],
             forbid=[Forbidden(**item) for item in raw.get("forbid", [])],
+            allow=[Allowed(**item) for item in raw.get("allow", [])],
             caller=parse_caller(raw["caller"]),
             race=parse_race(raw["race"]) if "race" in raw else None,
             drop=parse_drop(raw["drop"]) if "drop" in raw else None,
@@ -120,6 +133,10 @@ def _check_names(task: Task, path: Path) -> None:
             raise ValueError(f"bad task file {path.name}: bad names {bad}")
         if (item.fields is None) == (item.count is None):
             raise ValueError(f"bad task file {path.name}: give either fields or count for {item.table}")
+    for allowed in task.allow:
+        bad = [name for name in (allowed.table, *allowed.where) if not _NAME.match(name)]
+        if bad:
+            raise ValueError(f"bad task file {path.name}: bad names {bad}")
 
 
 def _check_director_plan(task: Task, path: Path) -> None:

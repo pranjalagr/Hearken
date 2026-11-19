@@ -1506,3 +1506,53 @@ def test_the_talk_command_uses_the_web_phones_robot_address():
     index = (ROOT / "lab" / "web_phone" / "index.html").read_text(encoding="utf-8")
     assert f"ws://127.0.0.1:{talk_to_caller.ROBOT_PORT}/call" in index
     assert "cli.person_robot" in talk_to_caller.PersonRobot().command(None, None, "", None, None)
+
+
+# ---- a yes-question with the wrong address: the caller says no (19 Nov 2026) --------------
+# The lines are what the caller's ears really wrote on 18 Nov (run agent-c-groq-4).
+
+@pytest.mark.parametrize("task_id, asked, wrong", [
+    # The order number as the address (food_04): numbers 4561, not 2.
+    ("food_04_change_address", "Order chaar paanch chhah ek ka address badalkar chaar paanch chhah ek kar doon", True),
+    # The order number stuck on the front (food_14): numbers 45 30 74 15, not 74 15.
+    ("food_14_address_corrected_while_saving",
+     "Order chaar paanch teen shoonya ka address badalkar paintalis tees house chauhattar sector pandrah Gurgaon kar do", True),
+    # The right one, the voice saying "2C" as "do C" and the ears spelling Ludhiana their way.
+    ("food_04_change_address", "Order 4561 ka address badal kar flat do C, Rose Apartments, Model Town, Ludhiyana kar doon? Haan ya nahi?", False),
+    ("food_14_address_corrected_while_saving",
+     "Order 4530 ka address badalkar house chauhattar sector pandrah Gurgaon kar doon", False),
+    # Not an address question: nothing to check.
+    ("food_04_change_address", "Order 4561 cancel kar doon? Haan ya nahi?", False),
+])
+def test_code_finds_a_wrong_address_in_a_yes_question(task_id, asked, wrong):
+    assert (brain_module.wrong_address_asked(asked, TASKS[task_id].caller) is not None) == wrong
+
+
+def test_an_address_the_caller_said_itself_counts_as_its_own_but_its_order_number_does_not():
+    # food_14 tells the caller to say "House 47" on purpose first, and correct it later.
+    spec = TASKS["food_14_address_corrected_while_saving"].caller
+    asked = "Order 4530 ka address badalkar house saintaalees sector pandrah Gurgaon kar doon"
+    assert brain_module.wrong_address_asked(asked, spec) is not None
+    assert brain_module.wrong_address_asked(asked, spec, ["House 47, Sector 15, Gurgaon."]) is None
+    numbers_only = "Order 4530 ka address badalkar paintaalees tees kar doon"
+    assert brain_module.wrong_address_asked(numbers_only, spec, ["45 30"]) is not None
+
+
+async def test_a_yes_to_a_wrong_address_is_turned_into_a_no():
+    # The model says "Haan." to the order number as the address, is told, and still says yes:
+    # code says the no itself, with the right address, and marks no yes.
+    ask, asked = scripted(answer("Haan.", "हां।", action="change_address", order=4561),
+                          answer("Haan, kar dijiye.", "हां, कर दीजिए।", action="change_address", order=4561))
+    history = [Turn("robot", "Order chaar paanch chhah ek ka address badalkar chaar paanch chhah ek kar doon")]
+    thought = await Brain(TASKS["food_04_change_address"].caller, ask).think(history)
+    assert thought.agrees is None and thought.line.startswith("No, that address is wrong")
+    assert "Flat 2C, Rose Apartments, Model Town, Ludhiana" in thought.line
+    assert "not yours" in asked[1][1][-1]["content"]
+
+
+async def test_a_no_to_a_wrong_address_is_left_as_it_is():
+    ask, _ = scripted(answer("Nahi, address galat hai. Flat 2C, Rose Apartments, Model Town, Ludhiana.",
+                             "नहीं, एड्रेस गलत है। Flat 2C, Rose Apartments, Model Town, Ludhiana."))
+    history = [Turn("robot", "Order chaar paanch chhah ek ka address badalkar chaar paanch chhah ek kar doon")]
+    thought = await Brain(TASKS["food_04_change_address"].caller, ask).think(history)
+    assert thought.line.startswith("Nahi, address galat hai") and not thought.problems

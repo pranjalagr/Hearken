@@ -35,3 +35,10 @@ expect:
     count: 0
 forbid:
   - action: cancel_order
+# The owner's rule (17 Nov 2026, kept): a caller who insists on a refused request after one
+# explanation is handed to a person. That is a right call here, so a hand-over for this order
+# is allowed (19 Nov 2026, the owner's choice), not required: a caller who accepts the "no"
+# needs none.
+allow:
+  - table: handoffs
+    where: {order_no: 4530}

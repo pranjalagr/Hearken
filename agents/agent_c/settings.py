@@ -25,8 +25,17 @@ class AgentCSettings:
     @property
     def models(self) -> dict[str, str]:
         """Kept with every run (run.json), so an old run keeps its meaning."""
-        return {"talker": self.talker["model"], "thinker": self.thinker["model"], "ears": self.ears["model"],
-                "voice": f"{self.voice['model']}/{self.voice['speaker']}"}
+        models = {"talker": self.talker["model"], "thinker": self.thinker["model"], "ears": self.ears["model"],
+                  "voice": f"{self.voice['model']}/{self.voice['speaker']}"}
+        if self.thinker.get("decide_model"):
+            models["thinker_decide"] = self.thinker["decide_model"]  # on Groq since 17 Nov 2026
+        judge = (self.raw.get("guard") or {}).get("judge_model")
+        if judge:
+            models["yes_judge"] = judge  # on Groq since 18 Nov 2026, as the Talker
+        check = self.raw.get("address_check") or {}
+        if check.get("model"):
+            models["address_check"] = f"{check.get('provider', '')} {check['model']}"  # 19 Nov 2026
+        return models
 
     def section(self, name: str) -> dict[str, Any]:
         return dict(self.raw.get(name) or {})

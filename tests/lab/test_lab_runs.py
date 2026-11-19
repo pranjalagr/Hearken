@@ -434,3 +434,24 @@ def test_a_key_that_failed_in_a_call_is_dropped_though_its_tiny_check_passes(mon
     assert keys.choose() == [] and keys.chosen() == {"groq": "Q2"}
     keys.drop("groq")
     assert keys.choose() == [] and keys.chosen() == {"groq": "Q3"} and os.environ[GROQ_KEY_CHOICE] == "Q3"
+
+
+def test_the_robot_gets_every_groq_key_the_current_one_first(monkeypatch):
+    # 17 Nov 2026: Agent C's "decide" step runs on Groq and moves to the next key itself.
+    import os
+
+    from common.env import GROQ_KEY_CHOICE, GROQ_POOL_CHOICE
+    from lab.runner.key_order import KeyOrder
+
+    monkeypatch.delenv(GROQ_KEY_CHOICE, raising=False)
+    monkeypatch.delenv(GROQ_POOL_CHOICE, raising=False)
+    full = {"Q1"}
+
+    def groq():
+        name = os.environ[GROQ_KEY_CHOICE]
+        return f"{name}: 429" if name in full else None
+
+    keys = KeyOrder({"groq": ["Q1", "Q2", "Q3"]}, {"groq": groq}, say=lambda line: None)
+    assert keys.choose() == [] and os.environ[GROQ_KEY_CHOICE] == "Q2"
+    # The caller's used-up key stays in, at the end: the robot's model has its own budget.
+    assert os.environ[GROQ_POOL_CHOICE] == "Q2,Q3,Q1"

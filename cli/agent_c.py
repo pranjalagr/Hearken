@@ -26,7 +26,7 @@ from agents.agent_c.settings import load_settings
 from agents.common.call_box import CallBoxSettings
 from agents.common.diary import NO_DIARY, Diary
 from agents.common.tools import mcp_tools
-from common.env import gemini_key, gemini_pool, load_env, sarvam_key
+from common.env import gemini_key, gemini_pool, groq_pool, jev_key, key_names, load_env, sarvam_key
 from common.stopwatch import JsonlSink
 from common.wire.robot_line import RobotLine, bound_port, serve_robot
 from engine.storage.call_settings import read_call_settings
@@ -39,7 +39,8 @@ from packs.registry import get_pack
 async def main(args: argparse.Namespace) -> str:
     load_env()
     # Read here, never printed. The pool is every key the lab rotates over (lab/key_order.yaml).
-    keys = Keys(gemini=gemini_key(), sarvam=sarvam_key(), gemini_pool=tuple(gemini_pool()))
+    keys = Keys(gemini=gemini_key(), sarvam=sarvam_key(), gemini_pool=tuple(gemini_pool()),
+                groq_pool=tuple(groq_pool()), names=key_names(), jev=jev_key())
     settings = load_settings()
     db_path = Path(args.db)
     sink = JsonlSink(Path(args.diary)) if args.diary else None

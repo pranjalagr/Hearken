@@ -20,6 +20,7 @@ from typing import Any
 
 import httpx
 
+from agents.common.ai_log import NO_LOG, AiLog, openai_style_details, timed
 from agents.common.number_reader import INCOMPLETE, OK, TOO_LONG, UNREADABLE, read_number
 
 FIND_RULES = Path(__file__).resolve().parent / "prompts" / "find_numbers.md"
@@ -45,8 +46,10 @@ class Heard:
     digits: str = ""  # the reader's digits, when HEARD
 
 
-def sarvam_find(client: httpx.AsyncClient, model: str, rules: str | None = None) -> FindNumbers:
-    """The real finder: one request to Sarvam's chat, answered in JSON."""
+def sarvam_find(client: httpx.AsyncClient, model: str, rules: str | None = None,
+                log: AiLog | None = NO_LOG, key: str = "") -> FindNumbers:
+    """The real finder: one request to Sarvam's chat, answered in JSON. `key` is the key's
+    .env name for the request log, never the key."""
     rules = rules or FIND_RULES.read_text(encoding="utf-8")
     answer_form = {"type": "json_schema", "json_schema": {"name": "numbers", "strict": True, "schema": FIND_FORM}}
 
@@ -54,7 +57,11 @@ def sarvam_find(client: httpx.AsyncClient, model: str, rules: str | None = None)
         # Thinking off with a null reasoning_effort: Sarvam refused "none" (8 Nov 2026).
         body = {"model": model, "reasoning_effort": None, "response_format": answer_form,
                 "messages": [{"role": "system", "content": rules}, {"role": "user", "content": words}]}
-        response = await client.post("/chat/completions", json=body)
+        async with timed(log, "sarvam", model, key, "number finder") as req:
+            response = await client.post("/chat/completions", json=body)
+            req.add(openai_style_details(response))
+            if response.is_error:
+                req.refused(response.status_code, response.text, response.headers)
         if response.is_error:
             # Raised with the response, so common/retry.py can see a 429 or a 5xx, and with
             # Sarvam's own words, so the lab sees "No credits available" as a key limit and

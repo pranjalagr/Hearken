@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from agents.agent_c.call_job import CallJob
-from agents.agent_c.guard.judge import NO, OTHER, STOP, UNCLEAR, YES, YesJudge, word_list_label
+from agents.agent_c.guard.judge import CHANGED, NO, OTHER, STOP, UNCLEAR, YES, YesJudge, word_list_label
 from agents.agent_c.notebook import RESULT, YES_ANSWER, Note, Notebook
 from agents.agent_c.talker.language import StickyLanguage
 from agents.common.call_box import UNKNOWN, BoxClosing
@@ -71,11 +71,18 @@ class GuardSettings:
     stop_words: Mapping[str, str]  # word -> "no" or "stop"
     change_retries: int = 2  # decision 19: a confirm with no answer, sent again with the same token
     expired_reprepares: int = 1  # decision 19: an expired token is prepared again and asked again
+    # A spoken yes counts only once the caller has stayed quiet this long after their turn ended
+    # (settings.yaml guard.yes_hold_s says why). 0 confirms at once, as before 18 Nov 2026.
+    yes_hold_s: float = 0.0
+    # A yes held because the caller spoke again, with no new turn finished in this long: the
+    # question is asked again, short, instead of waiting for ever.
+    held_wait_s: float = 8.0
 
     @classmethod
     def from_settings(cls, section: dict[str, Any]) -> GuardSettings:
         return cls(float(section["reask_wait_s"]), float(section["vad_start_s"]), dict(section["stop_words"]),
-                   int(section["change_retries"]), int(section["expired_reprepares"]))
+                   int(section["change_retries"]), int(section["expired_reprepares"]),
+                   float(section["yes_hold_s"]), float(section["held_wait_s"]))
 
 
 @dataclass
@@ -98,6 +105,10 @@ class YesMoment:
     ticket: str | None = None
     asks: int = 0
     answers: list[dict[str, Any]] = field(default_factory=list)
+    # A yes the caller talked on after (18 Nov 2026): its words and start wait for the rest of
+    # the sentence, and are judged together with it.
+    held: str = ""
+    held_start_ms: int | None = None
 
 
 class Guard:
@@ -122,6 +133,8 @@ class Guard:
         self.confirming: YesMoment | None = None  # a yes taken, its ticket being confirmed
         self._marks = 0
         self._turn_start_ms: int | None = None
+        self._turns_begun = 0  # how many caller turns began: a yes waits to see if another one does
+        self._answers_started = 0  # how many answers began being judged: only the newest may hold a yes
         self._cancelled: set[str] = set()  # tickets stopped by a "ruko"
 
     @property
@@ -143,6 +156,7 @@ class Guard:
         """The voice detector says the caller started talking. It needs vad_start_s of
         speech first, so the words began that much before the newest piece heard."""
         self._turn_start_ms = max(0, newest_caller_ms - round(self._settings.vad_start_s * 1000))
+        self._turns_begun += 1
 
     def partial(self, words: str) -> None:
         """Words still coming in. A listed "ruko"/"nahi" stops at once: a ticket being
@@ -212,11 +226,55 @@ class Guard:
         moment = self.moment
         if moment is None:
             return
+        loop = asyncio.get_running_loop()
+        finished_at, begun = loop.time(), self._turns_begun
+        self._answers_started += 1
+        mine = self._answers_started
+        if moment.held:
+            # The rest of a sentence that began with a yes: judged as one answer, from its start.
+            words, start_ms = f"{moment.held} {words}".strip(), moment.held_start_ms
+            moment.held, moment.held_start_ms = "", None
         label = word_list_label(words, self._settings.stop_words)
         if label is None:
             label = await self._judge.label(moment.question, words)
         early = start_ms is None or moment.played_ms is None or start_ms < moment.played_ms
+        if label == YES and not early and not await self._caller_stayed_quiet(finished_at, begun):
+            # 18 Nov 2026, food_04: "Haan, sahi hai." was confirmed while the caller went on
+            # "... Flat 2C, Rose Apartments", correcting the address the question said. A yes
+            # counts only if the caller stays quiet after it; if they talk on, the yes waits for
+            # the rest, and the whole sentence is judged (often "changed").
+            if self.moment is moment and self._answers_started == mine:
+                self._hold(moment, words, start_ms)
+            else:
+                # A later turn was already judged on its own (a slow judge): its words are the
+                # caller's newest, so this yes is not kept for it. Never confirmed either.
+                self._diary.decision("yes dropped: a later answer came first", words=words)
+            return
         await self._decide(label, words, early, start_ms)
+
+    async def _caller_stayed_quiet(self, finished_at: float, begun: int) -> bool:
+        """Wait until yes_hold_s after the turn ended (the judge's own time counts towards it),
+        then: did no new caller turn begin meanwhile?"""
+        left = finished_at + self._settings.yes_hold_s - asyncio.get_running_loop().time()
+        if left > 0:
+            await asyncio.sleep(left)
+        return self._turns_begun == begun
+
+    def _hold(self, moment: YesMoment, words: str, start_ms: int | None) -> None:
+        """Keep the yes's words for the caller's next turn (a turn that ends with no words, a
+        cough, joins nothing, and the yes is judged again on its own). If no turn finishes at
+        all, ask again, short, after held_wait_s: never wait for ever."""
+        moment.held, moment.held_start_ms = words, start_ms
+        self._diary.decision("yes held: caller talked on", words=words, hold_s=self._settings.yes_hold_s)
+        self._box.start("guard:held", self._held_too_long(moment, words))
+
+    async def _held_too_long(self, moment: YesMoment, words: str) -> None:
+        await asyncio.sleep(self._settings.held_wait_s)
+        if self.moment is moment and moment.held == words:
+            # The started turn never finished: its "turn began" mark is stale, so cleared too.
+            moment.held, moment.held_start_ms, self._turn_start_ms = "", None, None
+            self._diary.decision("yes held too long: asked again", words=words)
+            await self._ask(short=True)
 
     async def _decide(self, label: str, words: str, early: bool, start_ms: int | None) -> None:
         moment = self.moment
@@ -233,6 +291,8 @@ class Guard:
             await self._yes(moment, words)
         elif label in (NO, STOP):
             await self._stopped(moment, label, words)
+        elif label == CHANGED:
+            await self._changed(moment, words)
         elif label == OTHER:
             # Answered by the Talker and the Thinker; asked again, not counted (decision 23).
             self._note_answer(f"other: {words}")
@@ -275,13 +335,19 @@ class Guard:
         job = self._desk.job
         if job is not None:
             job.change_sent()
-        outcome, reason = UNKNOWN_OUTCOME, ""
+        outcome, reason, answer = UNKNOWN_OUTCOME, "", {}
         try:
             for attempt in range(1 + self._settings.change_retries):
                 try:
                     reply = await self._box.change(f"{CONFIRM}:{moment.action}",
                                                    self._tools.call(CONFIRM, {"token": moment.token, "ticket": moment.ticket}))
                     outcome, reason = self._outcome(moment, reply)
+                    if outcome == DONE:
+                        # The backend's own answer, as it came (decision 16): the refund a cancel
+                        # made, the amount refunded. 18 Nov 2026, food_01: only "done" was kept, so
+                        # nobody could say the ₹450 refund, and "decide" later said no tool could
+                        # check it, and handed over.
+                        answer = dict(reply.data)
                 except BoxClosing:
                     outcome, reason = STOPPED, "the call ended before confirm was sent"
                 except Exception as error:
@@ -293,7 +359,7 @@ class Guard:
             if job is not None:
                 job.change_answered()
         if outcome != EXPIRED:
-            self._result(moment, outcome, reason)
+            self._result(moment, outcome, reason, answer)
         return outcome
 
     def _outcome(self, moment: YesMoment, reply: Any) -> tuple[str, str]:
@@ -338,6 +404,18 @@ class Guard:
         self._note_answer(f"{label}: {words}" + (f" ({why})" if why else ""))
         self._result(moment, STOPPED, why or f"the caller said {label}")
 
+    async def _changed(self, moment: YesMoment, words: str) -> None:
+        """The caller corrected or replaced what was asked (the owner's choice, 18 Nov 2026):
+        close the question, never ask it again, confirm nothing. The Thinker decides again with
+        the caller's words and prepares the new change, with its own question. Nothing was saved:
+        a change is saved only after a yes, so the old token is just never used. No result note:
+        the Thinker would read a stale result at its next yes-question."""
+        self.moment = None  # a re-ask already waiting sees this and stays quiet (_ask_after)
+        self._diary.decision("yes moment changed", question=moment.asking, words=words)
+        if moment.ticket is not None:
+            await self._cancel_ticket(moment.ticket, "caller changed the request")
+        self._note_answer(f"changed: {words}")
+
     async def _cancel_ticket(self, ticket: str, reason: str) -> None:
         if await self._door.cancel_ticket(ticket, reason):
             self._cancelled.add(ticket)
@@ -353,10 +431,15 @@ class Guard:
     def _note_answer(self, text: str) -> None:
         self._notebook.add(YES_ANSWER, text, self._version())
 
-    def _result(self, moment: YesMoment, outcome: str, reason: str) -> None:
-        self._diary.decision("change result", action=moment.action, outcome=outcome, reason=reason)
-        self._notebook.add(RESULT, f"{moment.action}: {outcome}", self._version(),
-                           {"action": moment.action, "outcome": outcome, "reason": reason})
+    def _result(self, moment: YesMoment, outcome: str, reason: str, answer: Mapping[str, Any] | None = None) -> None:
+        """The change's result note. A finished change carries the backend's answer, in its
+        data ("backend") and in its words, so the Talker can say it and the Thinker sees it in
+        "already done" ("cancel_order: done, status cancelled, refund ₹450")."""
+        answer = dict(answer or {})
+        self._diary.decision("change result", action=moment.action, outcome=outcome, reason=reason, backend=answer)
+        facts = ", ".join(f"{key} {value}" for key, value in answer.items() if key != "order_no")
+        self._notebook.add(RESULT, f"{moment.action}: {outcome}" + (f", {facts}" if facts else ""), self._version(),
+                           {"action": moment.action, "outcome": outcome, "reason": reason, "backend": answer})
 
     def _ask_soon(self, short: bool = False) -> None:
         """Ask again once the Talker has had its say about the caller's words, and only

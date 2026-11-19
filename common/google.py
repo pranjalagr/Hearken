@@ -35,17 +35,29 @@ class ClientRing:
     Thinker's and judge's requests go round the owner's keys. Only the client changes per
     request; the Thinker keeps its own history, so nothing is lost between keys."""
 
-    def __init__(self, clients: list[Any]) -> None:
+    def __init__(self, clients: list[Any], names: list[str] | None = None) -> None:
         if not clients:
             raise ValueError("a client ring needs at least one client")
         self._clients = clients
+        # Each client's key by its .env name, for the AI request log (18 Nov 2026): which key
+        # was slow. Never the key itself.
+        self._names = list(names or [])
         self._next = 0
 
     @property
     def aio(self) -> Any:
-        client = self._clients[self._next % len(self._clients)]
+        return self.take()[1].aio
+
+    def take(self) -> tuple[str, Any]:
+        """The next client, with its key's .env name ("" when not named)."""
+        at = self._next % len(self._clients)
         self._next += 1
-        return client.aio
+        return (self._names[at] if at < len(self._names) else ""), self._clients[at]
+
+
+def take_client(client: Any) -> tuple[str, Any]:
+    """(key name, client) from a ClientRing, or ("", client) from a plain client."""
+    return client.take() if isinstance(client, ClientRing) else ("", client)
 
 
 def google_client(key: str, timeout_s: float, http_client: httpx.Client | None = None) -> Any:

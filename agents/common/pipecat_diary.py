@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pipecat.frames.frames import (
     ErrorFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     MetricsFrame,
     TranscriptionFrame,
@@ -22,7 +23,7 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 
 from agents.common.diary import Diary
 
-_WATCHED = (TranscriptionFrame, TTSStartedFrame, TTSTextFrame, TTSStoppedFrame, InterruptionFrame, MetricsFrame, ErrorFrame)
+_WATCHED = (TranscriptionFrame, InterimTranscriptionFrame, TTSStartedFrame, TTSTextFrame, TTSStoppedFrame, InterruptionFrame, MetricsFrame, ErrorFrame)
 
 
 class DiaryObserver(BaseObserver):
@@ -39,6 +40,12 @@ class DiaryObserver(BaseObserver):
         self._seen.add(frame.id)
         if isinstance(frame, TranscriptionFrame):
             self._diary.heard(frame.text, language=str(frame.language) if frame.language else None)
+        elif isinstance(frame, InterimTranscriptionFrame):
+            # The ears' words so far, before the caller finishes: marked partial, so a final
+            # "heard" row still means one finished piece. Kept for the end-of-turn test (decision
+            # 25, 18 Nov 2026): Namo reads words in Hindi letters, and nobody had checked which
+            # letters Sarvam's partial words come in, because they were never written down.
+            self._diary.heard(frame.text, partial=True, language=str(frame.language) if frame.language else None)
         elif isinstance(frame, TTSStartedFrame):
             self._saying = []
         elif isinstance(frame, TTSTextFrame):

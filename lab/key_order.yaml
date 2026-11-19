@@ -9,7 +9,9 @@
 #
 # Left out on purpose (checked 16 Nov 2026): GEMINI_API_KEY_2 (its project has no
 # free tier, 403), SARVAM_API_KEY_2 and _3 (no credit left, 402).
-gemini: [GEMINI_API_KEY, GEMINI_API_KEY_3, GEMINI_API_KEY_4, GEMINI_API_KEY_5]
+# GEMINI_API_KEY_6 and _7 added 17 Nov 2026 night (GEMINI_API_KEY_2 is left out: its project
+# has no free tier, 403).
+gemini: [GEMINI_API_KEY, GEMINI_API_KEY_3, GEMINI_API_KEY_4, GEMINI_API_KEY_5, GEMINI_API_KEY_6, GEMINI_API_KEY_7]
 
 # Services whose robots take turns over every working key, one request each, instead
 # of using one key: the owner's choice (16 Nov 2026), after Agent C went over Gemini's
@@ -17,7 +19,12 @@ gemini: [GEMINI_API_KEY, GEMINI_API_KEY_3, GEMINI_API_KEY_4, GEMINI_API_KEY_5]
 # spreading one program over several accounts, and accepted that risk for these keys.
 # Remove a service from this list to go back to one key at a time.
 rotate: [gemini]
-sarvam: [SARVAM_API_KEY_4, SARVAM_API_KEY_5, SARVAM_API_KEY_6, SARVAM_API_KEY]
-# GROQ_API_KEY_2 last: its 200K tokens a day were used up on 16 Nov 2026 though it
-# still passes the 1-token check.
-groq: [GROQ_API_KEY_3, GROQ_API_KEY_4, GROQ_API_KEY_5, GROQ_API_KEY, GROQ_API_KEY_2]
+# SARVAM_API_KEY_8 and _9 added 17 Nov 2026 night, after _7 (_2 and _3 have no credit, 402).
+sarvam: [SARVAM_API_KEY, SARVAM_API_KEY_7, SARVAM_API_KEY_8, SARVAM_API_KEY_9, SARVAM_API_KEY_6, SARVAM_API_KEY_5, SARVAM_API_KEY_4]
+# Groq's 200K tokens a day are per account, not per key. GROQ_API_KEY_3, _4 and _5 are
+# one account (17 Nov 2026: all three failed naming the same organization); GROQ_API_KEY
+# and GROQ_API_KEY_2 are other accounts. The fresh accounts go first: GROQ_API_KEY_6 and
+# _7 were added on 17 Nov 2026 evening, unused that day, after the others hit their daily limit.
+# GROQ_API_KEY_8 added later that night, when _6 and _7 ran out together (they name the same
+# Groq organization in their errors, so they share one daily limit).
+groq: [GROQ_API_KEY_8, GROQ_API_KEY_9, GROQ_API_KEY_6, GROQ_API_KEY_7, GROQ_API_KEY, GROQ_API_KEY_2, GROQ_API_KEY_3, GROQ_API_KEY_4, GROQ_API_KEY_5]

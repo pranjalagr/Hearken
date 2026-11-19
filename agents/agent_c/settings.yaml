@@ -8,11 +8,31 @@ greeting: "Namaste, Hearken Food se bol raha hoon. Bataiye?"
 
 talker:
   # Decision 2 (changed 15 Nov 2026): free Flash-Lite allows 500 requests a day.
-  model: gemini-3.5-flash-lite
+  # 18 Nov 2026, the owner's choice ("switch for now and test on 4-5 calls"): Groq, because
+  # that evening Flash-Lite took 6-8 s a request on 4 of 6 keys (Google's own server time) and
+  # the Talker's 8 s limit ran out 17 times in one run. qwen/qwen3.8-27b, thinking off, answered
+  # a Talker turn in ~0.6 s in good Hinglish and called the right exit (open_job, end_call). Its
+  # own model, so its daily budget (200K tokens, 1K requests per account) is not the lab
+  # caller's (gpt-oss-20b) or decide's (gpt-oss-120b). Back to Gemini: provider gemini and
+  # model gemini-3.5-flash-lite.
+  # 19 Nov 2026, the owner's choice: gpt-oss-120b, not qwen. On 33 real Talker turns, each asked
+  # twice (scratchpad talker_replay.py): qwen invented a tool name 8 times (Groq refuses those,
+  # and the Talker had to try again), chose the wrong exit 6 times and spoke English notes ("Sure,
+  # I can help you with that"); gpt-oss-120b invented none, 1 wrong exit, ~1.0 s, ~450 tokens a
+  # request. Not gpt-oss-20b (as good): that is the lab caller's model, and they'd share its
+  # daily budget on the same keys. 120b's budget, with decide and the small steps: ~16K tokens a
+  # call, ~12 calls a day per Groq account.
+  provider: groq
+  model: openai/gpt-oss-120b
+  options: {reasoning_effort: low}
   # Decision 18: temperature 1.0, thinking minimal (what the week-1 Talker checks used).
   temperature: 1.0
   # Decision 18: 1-2 sentences per reply, enforced by code (the mouth cuts the rest).
   max_sentences: 2
+
+# The Gemini model the lab's key check asks when no part runs on Gemini (18 Nov 2026): the
+# robot still holds Gemini keys, and switching a part back to Gemini is one setting.
+gemini_check_model: gemini-3.5-flash-lite
 
 language:  # decision 10 (15 Nov 2026): the sticky call language
   # A turn changes the language only with at least this many words: one "okay" or
@@ -21,7 +41,18 @@ language:  # decision 10 (15 Nov 2026): the sticky call language
 
 thinker:
   # The user's choice on 15 Nov 2026: Flash-Lite too (free tier, 500 requests a day).
-  model: gemini-3.5-flash-lite
+  # 18 Nov 2026, with the Talker (same reason): the small steps on Groq's gpt-oss-120b, the
+  # model "decide" already uses (reliable JSON). Back to Gemini: provider gemini, model
+  # gemini-3.5-flash-lite.
+  provider: groq
+  model: openai/gpt-oss-120b
+  # The "decide" step only, on Groq (the owner's choice, 17 Nov 2026): replaying run 7c's
+  # failed decide steps, Flash-Lite got 0 of 6 right (it made the order number the new
+  # address; it missed "Veg Mojo" as Veg Momos), gpt-oss-120b 6 of 6, ~1 s, ~1,500 tokens.
+  # Groq's free tier: 200K tokens a day and 8K a minute per account. Groq lists its limits
+  # per model, so the lab caller's gpt-oss-20b should keep its own budget (not yet proven:
+  # watch whether both run out together). The small steps stay on Flash-Lite.
+  decide_model: openai/gpt-oss-120b
 
 ears:  # decision 24 (2 Nov 2026), the same as Agent A's: best on key details
   model: saaras:v3-realtime
@@ -36,13 +67,40 @@ voice:  # decision 12, the same as Agent A's
   language: hi-IN
 
 thinker_limits:  # decision 30 (time limits), decision 19 (retries), for the Thinker graph
-  step_s: 8.0  # one Thinker AI step (decision 30: ~8 s, a starting guess)
-  # An AI step, or a lookup or prepare that errors, is tried once more; then the job is
-  # stuck: a "failed" note and a hand-over (decisions 14, 19).
+  # One Thinker AI step. 8 s was a starting guess (decision 30); raised to 10 s on 17 Nov 2026:
+  # in a Gemini slow spell (run 3) short answers took 6-9.5 s, and 7 calls crashed. 10 s is
+  # also the Gemini client's own shortest deadline (common/google.py).
+  step_s: 10.0
+  # A lookup or prepare that errors is tried once more (decision 19).
   step_retries: 1
+  # An AI step is tried twice more (was once, 17 Nov 2026, the same slow spell); then the
+  # job is stuck: a "failed" note and a hand-over (decision 14). The small steps (person,
+  # number check, "anything else?") ask the caller again instead of getting stuck.
+  step_ai_retries: 2
   # Decision 19: "same tool, inputs and answer repeat twice in a row: stop, one hand-over".
   # Read as the first time plus two repeats; Agent A's food_05 made 7 identical hand-over calls.
   same_call_limit: 3
+  # The owner's rule (18 Nov 2026): every caller word reaches the Thinker, whatever its step.
+  # A yes-question worked out before the caller's newest turn is not asked; the Thinker
+  # decides again with the whole call (food_14: "Gurgaon" came during decide, and the address
+  # was saved without it). At most this many times per change, then it is asked anyway: a
+  # caller who keeps talking must not keep the robot deciding. A starting guess.
+  redecide_limit: 2
+
+address_check:  # thinker/address_check.py (19 Nov 2026, the owner's idea)
+  # Before an address change is pressed: is it the address the caller gave? TypeSafe's Jev, a
+  # decision model, gives a probability. The owner's key is JEV_API_KEY in pakka/.env; without
+  # it there is no check, as before.
+  provider: jev
+  model: jev-latest
+  # Under this the change is not pressed. 0.5 on 52 cases from our calls: 30 of 33 wrong
+  # addresses caught, 4 of 19 right ones refused; 0.7 refused 8 right ones for no more caught.
+  line: 0.5
+  # One request's limit. ~1.1 s from India (its servers are in the US West), so 4 s leaves room;
+  # past it the change goes on unchecked, never blocked by the check.
+  check_s: 4.0
+  # The tool inputs it reads: the food pack's address change ("new_address"). A name, so here.
+  inputs: [new_address]
 
 notebook:
   max_notes: 200  # decision 7: no call needs more; past it something is going round in circles
@@ -62,12 +120,19 @@ hand_over_end:
   tries: 2
 
 guard:  # decisions 20-23
-  judge_model: gemini-3.5-flash-lite  # the one-word judge (decision 21)
+  # The one-word judge (decision 21). 18 Nov 2026, with the Talker (same reason): Groq's
+  # qwen/qwen3.8-27b, thinking off, said yes / changed / other right for three test answers in
+  # ~0.55 s each. Back to Gemini: judge_provider gemini, judge_model gemini-3.5-flash-lite.
+  judge_provider: groq
+  judge_model: qwen/qwen3.8-27b
+  judge_options: {reasoning_effort: none}
   # decision 30 said ~1 s, then "unclear", never a yes. 16 Nov 2026: the first real yes
   # timed out at 1 s, then three in one call at 2 s, in a Flash-Lite slow spell (1-9 s per
   # request on every key). The owner chose (same day) 5 s plus asking several keys at once.
-  # A timeout is still "unclear", never a yes.
-  judge_s: 5.0
+  # A timeout is still "unclear", never a yes. Raised to 8 s on 17 Nov 2026 (the owner's
+  # choice): in run 5's food_03 "Haan refund kar den" timed out on all 3 keys at 5 s in a slow
+  # spell, and the re-ask plus keypad cost the caller ~15 s more than waiting would have.
+  judge_s: 8.0
   # How many keys get the same judge question at once; the first answer wins (the owner's
   # choice, 16 Nov 2026). Each counts against the brain cap. 3 of the 3 back-office keys.
   judge_racers: 3
@@ -79,6 +144,16 @@ guard:  # decisions 20-23
   vad_start_s: 0.2
   # Decision 21: a no or a stop needs only one voice; these on the partial words are one.
   stop_words: {ruko: stop, mat: stop, wait: stop, stop: stop, nahi: "no"}
+  # A spoken yes counts only after the caller stays quiet this long once their turn ended
+  # (the owner's choice, 18 Nov 2026). food_01 (17 Nov) and food_04 (18 Nov): "Haan, sahi hai."
+  # was confirmed while the caller went on, correcting the change. Pauses inside a caller line
+  # that split turns today were 0.90, 0.93 and 1.31 s; the turn already ends after 0.7 s of quiet
+  # (turn_end.quiet_s), so 1.0 s more covers pauses up to 1.7 s. The judge's own ~1 s runs
+  # during it, so a real yes waits ~0-0.5 s more. A key press counts at once. A starting guess.
+  yes_hold_s: 1.0
+  # A yes held because the caller talked on, with no new turn finished in this long (a cough,
+  # no words): ask again, short. A guess: about one long caller sentence.
+  held_wait_s: 8.0
   # Decision 19: a confirm that got no answer is sent again with the same token, up to
   # this many more times (the backend answers "already_done" if the first one saved).
   change_retries: 2
@@ -91,6 +166,14 @@ stop_check:  # decision 26: the haan-ruko model (Part 4, v4) while the robot tal
   line: 0.30  # Part 4's chosen line for v4
   window_s: 2.0  # the model hears the last 2 s (lab/haan_ruko/sound.py WINDOW_S)
   every_s: 0.1  # one check every 0.1 s while the robot talks
+
+turn_end:  # decision 25 (on hold, 18 Nov 2026): when has the caller finished?
+  # The turn ends after this much quiet, counted from the caller's last sound. The owner's
+  # choice, 18 Nov 2026, as a first try: on 187 real lab caller lines, pauses inside a
+  # sentence had a median of 0.29 s; a 0.7 s rule would cut off 3 of 132 of them, while
+  # Smart Turn (the default before) cut off 65 of 90 and Namo (words) scored only 0.65.
+  # The ears' finished words already come ~0.57 s after the caller stops (decision 24).
+  quiet_s: 0.7
 
 number_finder:  # decision 27: Sarvam points at the number words, code reads the digits
   model: sarvam-105b-conversations
@@ -122,6 +205,10 @@ speed:
 waiting_lines:  # decision 11
   first_s: 1.0  # the first line after ~1 s of robot silence while the Thinker works
   every_s: 4.0  # then one every ~4 s, start to start, while it still works
+  # When the robot spoke last (its own question, plan or reply), the first waiting line waits
+  # this long instead, so the caller can answer first (17 Nov 2026, run 5, food_04: the lab
+  # caller needs ~1.5 s of quiet; 3 s is a starting guess with room for a real caller too).
+  after_robot_s: 3.0
   # The clips made once by `python -m cli.agent_c_lines make`, outside git (runs/ is
   # ignored, and sound files never go in git). One folder per voice, so a new voice
   # never plays an old voice's clips. Without a clip the line goes to the live voice.

@@ -1,7 +1,7 @@
 """The Guard's two voices on what the caller answered (decision 21).
 
 - The judge: Flash-Lite answers one word, under a ~1 s limit. A timeout, an error
-  or any word outside the five labels is "unclear", never a yes.
+  or any word outside the six labels is "unclear", never a yes.
 - The word list: "ruko", "nahi", "mat"... on the partial words. A no or a stop needs
   only one voice, so a stop is heard the moment the ears give the word, without
   waiting for the caller to finish or for the judge.
@@ -15,9 +15,15 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 
 from agents.agent_c.live_retry import try_live
+from agents.common.ai_log import NO_LOG, AiLog, gemini_details, openai_style_details, timed
+from common.google import take_client
 
 YES, NO, STOP, UNCLEAR, OTHER = "yes", "no", "stop", "unclear", "other"
-LABELS = (YES, NO, STOP, UNCLEAR, OTHER)
+# The caller corrects or replaces what the question asks (the owner's choice, 18 Nov 2026):
+# the old question is now wrong, so the Guard closes it instead of asking it again. Decided
+# here, not by the Thinker: the Guard re-asks after ~1.5 s, sooner than a Thinker step answers.
+CHANGED = "changed"
+LABELS = (YES, NO, STOP, UNCLEAR, OTHER, CHANGED)
 
 
 class YesJudge(Protocol):
@@ -85,16 +91,46 @@ def first_answer(ask: Callable[[str, str], Awaitable[str]], racers: int) -> Call
     return ask_first
 
 
-def gemini_ask(client: Any, model: str, system: str) -> Callable[[str, str], Awaitable[str]]:
-    """The judge on Gemini Flash-Lite: one short answer, thinking minimal."""
+def groq_ask(clients: Any, model: str, system: str, log: AiLog | None = NO_LOG,
+             extra: Mapping[str, Any] | None = None) -> Callable[[str, str], Awaitable[str]]:
+    """The judge on Groq (18 Nov 2026, the owner's choice, when Gemini took 6-8 s a request):
+    one short answer. `clients` is a ClientRing of Groq clients, so each racer goes out on
+    its own key. On 18 Nov qwen/qwen3.8-27b, thinking off, said yes / changed / other right
+    for "Haan kar dijiye", "Flat 2C, Rose Apartments" and "kitna milega?", ~0.55 s each."""
+    import httpx
+
+    async def ask(question: str, words: str) -> str:
+        key, client = take_client(clients)
+        body = {"model": model, "temperature": 0.0, "max_tokens": 5, **dict(extra or {}),
+                "messages": [{"role": "system", "content": system},
+                             {"role": "user", "content": f"Question: {question}\nCaller's answer: {words}"}]}
+        async with timed(log, "groq", model, key, "yes-judge") as req:
+            response = await client.post("/chat/completions", json=body)
+            req.add(openai_style_details(response))
+            if response.is_error:
+                req.refused(response.status_code, response.text, response.headers)
+                raise httpx.HTTPStatusError(f"Groq said {response.status_code}: {response.text[:200]}",
+                                            request=response.request, response=response)
+        return response.json()["choices"][0]["message"].get("content") or ""
+
+    return ask
+
+
+def gemini_ask(client: Any, model: str, system: str, log: AiLog | None = NO_LOG) -> Callable[[str, str], Awaitable[str]]:
+    """The judge on Gemini Flash-Lite: one short answer, thinking minimal. With a ClientRing,
+    each ask takes the next key, and each racer gets its own row in the request log: the
+    losers show as "cut off", so each key's speed is seen, not only the winner's."""
     from google.genai import types
 
     config = types.GenerateContentConfig(system_instruction=system, temperature=0.0, max_output_tokens=5,
                                          thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL))
 
     async def ask(question: str, words: str) -> str:
-        response = await client.aio.models.generate_content(
-            model=model, contents=f"Question: {question}\nCaller's answer: {words}", config=config)
+        key, one = take_client(client)
+        async with timed(log, "gemini", model, key, "yes-judge") as req:
+            response = await one.aio.models.generate_content(
+                model=model, contents=f"Question: {question}\nCaller's answer: {words}", config=config)
+            req.add(gemini_details(response))
         return response.text or ""
 
     return ask

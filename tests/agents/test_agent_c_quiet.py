@@ -154,6 +154,31 @@ async def test_a_line_with_a_clip_plays_it_with_its_words_and_others_go_live():
     assert [f.text for f in out.queued if isinstance(f, TTSSpeakFrame)] == ["4521, dekh raha hoon."]
 
 
+async def test_a_clip_after_a_live_line_waits_until_that_line_has_played():
+    # 18 Nov 2026, food_01: "Aur kuch madad kar sakta hoon?" (a clip) was heard before the
+    # result line sent just before it (live: it holds the ₹450, and takes ~1 s to be made).
+    sound = b"\x00\x01" * 400
+    call = CallParts(load_settings(), Diary("c1", ListSink()), FoodPack().spoken_words(),
+                     clips={"Aur kuch madad kar sakta hoon?": sound})
+    out = Pushed()
+    call.clip_out.push_frame = out.push
+    call.task = out
+    await call.say("Aapka order cancel ho gaya hai, aur ₹450 ka refund bhi ho gaya hai.")  # live
+    clip = asyncio.create_task(call.say("Aur kuch madad kar sakta hoon?"))
+    await asyncio.sleep(0.3)
+    assert out.frames == []  # held back: the live line hasn't started yet
+    call.speech.speaking = True  # the live line starts...
+    await asyncio.sleep(0.2)
+    assert out.frames == []
+    call.speech.speaking = False  # ...and ends
+    await asyncio.wait_for(clip, 2)
+    assert out.frames[2].text == "Aur kuch madad kar sakta hoon?"
+    # With no live line before it, a clip goes out at once, as before.
+    start = asyncio.get_running_loop().time()
+    await call.say("Aur kuch madad kar sakta hoon?")
+    assert asyncio.get_running_loop().time() - start < 0.1
+
+
 async def test_the_clip_player_lets_every_frame_through():
     # A processor that forwards nothing swallows the StartFrame and the call never starts
     # (the stop switch did, 16 Nov 2026).
@@ -185,7 +210,7 @@ async def test_a_whole_call_with_waiting_lines_a_plan_and_a_silent_caller(open_c
     raw = dict(load_settings().raw)
     # The same rules, shortened so the test runs in seconds.
     raw.update(speed={"tick_s": 0.02, "reply_grace_s": 0.1, "question_wait_s": 2.0, "question_gap_s": 0.1},
-               waiting_lines={**raw["waiting_lines"], "first_s": 0.2, "every_s": 0.5},
+               waiting_lines={**raw["waiting_lines"], "first_s": 0.2, "every_s": 0.5, "after_robot_s": 0.3},
                silent_caller={"hello_s": 0.5, "line_gone_s": 0.5}, hand_over_end={"wait_s": 1.0, "tries": 2})
     settings = dataclasses.replace(load_settings(), raw=raw)
     opening = "Mujhe order 4521 cancel karna hai"
@@ -232,3 +257,23 @@ async def test_a_whole_call_with_waiting_lines_a_plan_and_a_silent_caller(open_c
     assert any(n.kind == RESULT for n in call.notebook.notes)
     assert said[-2:] == [words.phrase("silent", "hello", "hinglish"), words.phrase("silent", "line_gone", "hinglish")]
     assert result.reason == "the caller went silent" and line.ended == ["the caller went silent"]
+
+
+async def test_after_the_robots_own_line_the_first_waiting_line_waits_longer():
+    # 17 Nov 2026, run 5, food_04: the 1 s filler always came before the caller's answer to
+    # the robot's question (the lab caller needs ~1.5 s of quiet), so the answer was thrown
+    # away until the call broke. After the robot's line: 3 s; after the caller's: still 1 s.
+    state = State()
+    w, said, _ = watch(state)
+    state.robot = True
+    await run_until(state, w, 0.5)
+    state.robot = False
+    await run_until(state, w, 3.0)
+    assert said == []  # room for the caller to answer
+    await run_until(state, w, 4.0)
+    assert len(said) == 1
+    state.caller = True
+    await run_until(state, w, 6.0)
+    state.caller = False
+    await run_until(state, w, 9.3)  # 4 s after the last line, and 1 s after the caller
+    assert len(said) == 2

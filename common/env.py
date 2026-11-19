@@ -85,3 +85,39 @@ def groq_key_name() -> str:
 
 def groq_key() -> str:
     return require(groq_key_name())
+
+
+# Every Groq key by .env name, comma-separated, the current one first: set by the lab for
+# Agent C's Thinker, whose "decide" step runs on Groq (17 Nov 2026, the owner's choice). The
+# robot starts on the first and moves to the next when one is refused for its limits.
+GROQ_POOL_CHOICE = "HEARKEN_GROQ_KEYS"
+
+
+def groq_pool() -> list[str]:
+    """The Groq keys in the order to try; just the chosen key when no list is set."""
+    names = [name.strip() for name in os.environ.get(GROQ_POOL_CHOICE, "").split(",") if name.strip()]
+    return [require(name) for name in names] or [groq_key()]
+
+
+# The address check's key (TypeSafe Jev, 19 Nov 2026): optional, so the robot runs without it.
+JEV_KEY_NAME = "JEV_API_KEY"
+
+
+def jev_key() -> str:
+    """The Jev key, or "" when there is none (the address check is then off)."""
+    return os.environ.get(JEV_KEY_NAME, "").strip()
+
+
+def key_names() -> dict[str, str]:
+    """Each key this run holds, by its .env name: {key: name}. For logs that must say which
+    key was used (the AI request log, 18 Nov 2026) without ever writing a key. Only the
+    lookup goes key -> name; nothing here prints a value."""
+    names = [gemini_key_name(), sarvam_key_name(), groq_key_name(), JEV_KEY_NAME]
+    for choice in (GEMINI_POOL_CHOICE, GROQ_POOL_CHOICE):
+        names += [name.strip() for name in os.environ.get(choice, "").split(",") if name.strip()]
+    found: dict[str, str] = {}
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            found.setdefault(value, name)
+    return found

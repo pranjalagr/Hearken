@@ -133,6 +133,31 @@ def test_with_the_model_the_callers_sound_never_interrupts_by_itself():
     assert parts.switch in pipeline.processors
 
 
+
+@pytest.mark.parametrize("with_model", [True, False])
+def test_a_turn_ends_after_the_quiet_in_settings_never_on_smart_turn(with_model):
+    # 18 Nov 2026: Pipecat's default Smart Turn ended turns at pauses inside a sentence
+    # ("House 74, Sector 15," | "Gurgaon"): 65 of 90 such pauses on real lab calls. Now the
+    # turn ends after quiet_s of quiet in total, with or without the stop-or-keep model.
+    from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
+    from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+
+    class FakeLine:
+        async def send_audio(self, piece): ...
+
+        async def clear(self): ...
+
+    settings = load_settings()
+    model = LoudnessModel() if with_model else None
+    robot = AgentC(settings, Keys("g", "s"), None, stop_model=model)
+    parts = CallParts(settings, Diary("c1", ListSink()), SpokenWords(), stop_model=model)
+    pipeline = robot.pipeline(LineTransport(FakeLine()), parts)
+    [user] = [p for p in pipeline.processors if type(p).__name__ == "LLMUserAggregator"]
+    [stop] = user._params.user_turn_strategies.stop
+    quiet_s = float(settings.section("turn_end")["quiet_s"])
+    assert isinstance(stop, SpeechTimeoutUserTurnStopStrategy)
+    assert abs(stop._user_speech_timeout + VAD_STOP_SECS - quiet_s) < 1e-9  # the detector's wait counts too
+
 def test_without_a_model_file_agent_c_says_so_and_falls_back_to_pipecats_own_stop():
     import dataclasses
 

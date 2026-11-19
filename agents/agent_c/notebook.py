@@ -32,10 +32,12 @@ ORDER_NUMBER = "order_number"      # the Talker heard a full order number (its r
 CHECKED_NUMBER = "checked_number"  # the Thinker's AI checked that number; the only one used or said
 PLAN = "plan"                      # the Thinker's plan, said instead of a waiting line
 ASKS_USED_UP = "asks_used_up"      # the Talker asked again, digit by digit and by keypad: still not found
-ANSWERED = "answered"              # the Thinker answered from the order (a lookup): the Talker asks "anything else?"
+ANSWERED = "answered"              # the Thinker answered from the order (a lookup), or must ask again: the Talker asks "anything else?"
+# Added 18 Nov 2026 (the owner's rule: every caller word reaches the Thinker, whatever its step):
+YES_DROPPED = "yes_dropped"        # the Talker didn't ask a yes-question: the caller spoke after it was worked out
 
 KINDS = (REQUEST, CALLER, FACT, NEED_INFO, NEED_YES, RESULT, ANSWER, STILL_GOOD, FAILED, YES_ANSWER, ASKED,
-         ORDER_NUMBER, CHECKED_NUMBER, PLAN, ASKS_USED_UP, ANSWERED)
+         ORDER_NUMBER, CHECKED_NUMBER, PLAN, ASKS_USED_UP, ANSWERED, YES_DROPPED)
 # What the caller should hear about, through the Talker.
 SPEAKABLE = (FACT, NEED_INFO, RESULT, ANSWER, FAILED, CHECKED_NUMBER, PLAN)
 

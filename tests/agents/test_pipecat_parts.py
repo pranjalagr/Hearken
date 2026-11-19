@@ -4,7 +4,7 @@ every call is written down, and what was heard and said is recorded once."""
 import asyncio
 
 import pytest
-from pipecat.frames.frames import (InterruptionFrame, MetricsFrame, TranscriptionFrame, TTSStartedFrame,
+from pipecat.frames.frames import (InterimTranscriptionFrame, InterruptionFrame, MetricsFrame, TranscriptionFrame, TTSStartedFrame,
                                    TTSStoppedFrame, TTSTextFrame)
 from pipecat.metrics.metrics import LLMTokenUsage, LLMUsageMetricsData, TTSUsageMetricsData
 from pipecat.observers.base_observer import FramePushed
@@ -113,6 +113,23 @@ async def test_the_diary_records_heard_said_cut_and_costs_once_each():
     assert costs == {("gemini-3.5-flash-lite", "input tokens"): 900, ("gemini-3.5-flash-lite", "output tokens"): 40,
                      ("bulbul:v4-flash", "characters"): 27}
 
+
+
+async def test_the_diary_keeps_partial_words_marked_apart_from_finished_ones():
+    # 18 Nov 2026 (decision 25): Namo needs words in Hindi letters, and the ears' partial words
+    # were never written down, so nobody could check which letters they come in.
+    sink = ListSink()
+    observer = DiaryObserver(Diary("c1", sink))
+
+    async def push(frame, times=1):
+        for _ in range(times):  # a frame passes several processors
+            await observer.on_push_frame(FramePushed(source=None, destination=None, frame=frame,
+                                                     direction=FrameDirection.DOWNSTREAM, timestamp=0))
+
+    await push(InterimTranscriptionFrame("हाउस 74", "caller", "t"), times=3)
+    await push(TranscriptionFrame("House 74, Sector 15,", "caller", "t"))
+    heard = [(r["text"], r.get("partial", False)) for r in _kinds(sink, "heard")]
+    assert heard == [("हाउस 74", True), ("House 74, Sector 15,", False)]  # each once; finals unmarked
 
 async def test_the_mcp_tool_list_reads_as_tool_specs():
     # Uses the MCP library's own types: on 15 Nov 2026 the first real call crashed on a

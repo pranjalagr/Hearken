@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, TypedDict
@@ -44,6 +45,8 @@ from agents.agent_c.notebook import (
     PLAN,
     REQUEST,
     RESULT,
+    YES_ANSWER,
+    YES_DROPPED,
     Note,
     Notebook,
 )
@@ -56,13 +59,14 @@ from engine.contract.spoken import SpokenWords
 # The kinds of event.
 TURN, NOTE, KEY, TIMEOUT, HAND_OVER, JOB_CLOSED = "turn", "note", "key", "timeout", "hand_over", "job_closed"
 # Notes the Talker writes itself: never said back to the caller.
-OWN_NOTES = (REQUEST, CALLER, ORDER_NUMBER, ASKS_USED_UP)
+OWN_NOTES = (REQUEST, CALLER, ORDER_NUMBER, ASKS_USED_UP, YES_DROPPED)
 # Decision 27's ask-again steps after "not found", in order (lines in words.yaml's "ladder").
 LADDER = ("number_again", "number_digits", "number_keypad")
 KEYPAD_END = "#"
-# Notes not said once the caller has spoken since they were worked out (decision 16). The
-# yes-question, results, questions and failures are always said: skipping one would leave
-# the job waiting for an answer the caller never heard.
+# Notes not said once the caller has spoken since they were worked out (decision 16).
+# Results, questions and failures are always said: skipping one would leave the job waiting
+# for an answer the caller never heard. The yes-question has its own rule (_say_one_note):
+# it is dropped too, and the Thinker is told, so it decides again instead of waiting.
 OLD_NEWS_SKIPPED = (PLAN, ANSWER, CHECKED_NUMBER, FACT)
 
 
@@ -124,6 +128,9 @@ class TalkState(TypedDict, total=False):
     misses: int  # how many times the order wasn't found (the ask-again count)
     typed: str  # digits typed on the keypad so far
     after: str  # where to go next
+    # The robot's last note line asked the caller something (a question, an explanation
+    # offering a person, "anything else?"): their next words answer it (see job_turn).
+    asked: bool
 
 
 # ---- small helpers -------------------------------------------------------------------
@@ -217,7 +224,10 @@ async def _ai_reply(parts: TalkerParts, step: str, facts: dict[str, Any], exits:
                 parts.ai.reply(step, {**facts, "language": parts.language()}, exits, speak), parts.reply_s)
             parts.on_step(step, {"exit": exit_})
             return exit_
-        except Exception:
+        except Exception as error:
+            # Always in the diary: 17 Nov 2026, run 6, food_04, every reply failed on a used-up
+            # key, the caller heard only the safe line, and the diary showed no error at all.
+            parts.on_error(f"talker AI failed at step {step!r}: {error!r}"[:300])
             if said:
                 break  # part of the reply was said: asking again would repeat it
     if not said:
@@ -284,7 +294,13 @@ async def collect_turn(state: TalkState, config) -> TalkState:
     if state.get("mode") in ("wait_collect", "wait_keypad"):
         parts.new_turn()
         _write(parts, CALLER, words)  # every turn in a job reaches the Thinker (decision 7)
-    exit_ = await _ai_reply(parts, "collect", {"caller_said": words}, ("heard_number",))
+    if re.search(rf"(?<!\d)\d{{{parts.number_length}}}(?!\d)", words):
+        # A whole order number already in digits ("Order number 4512"): code sends it to the
+        # finder, never the AI's guess. 17 Nov 2026, run 5, food_03: the AI missed "4512" and
+        # asked for the number again (the owner's rule: a rule the AI breaks becomes code).
+        exit_ = "heard_number"
+    else:
+        exit_ = await _ai_reply(parts, "collect", {"caller_said": words}, ("heard_number",))
     if exit_ != "heard_number":
         return {"after": "wait_collect"}  # the AI answered and asked for the number
     numbers: list = []
@@ -319,11 +335,18 @@ async def collect_turn(state: TalkState, config) -> TalkState:
 
 async def job_turn(state: TalkState, config) -> TalkState:
     """A caller turn while the Thinker works. It goes to the Thinker (decision 7), and the
-    AI answers as usual: says back what it understood, never an outcome (decision 18)."""
+    AI answers as usual: says back what it understood, never an outcome (decision 18).
+    When the robot has just asked the caller something, the words answer it: the Thinker
+    reads them and speaks next, so the Talker stays quiet unless the caller asks a question
+    back. 17 Nov 2026, run 5, food_04: speech-to-text split an address into two turns, the
+    Talker replied to each, and with the Thinker's question and a waiting line the robot said
+    7 lines in 30 s; the caller never got a gap to answer and the call broke 3 times."""
     parts = _parts(config)
     words = state["event"]["words"]
     parts.new_turn()
     _write(parts, CALLER, words)
+    if state.get("asked") and "?" not in words:
+        return {}
     notes = [note.text for note in parts.notebook.notes if note.kind not in OWN_NOTES][-6:]
     await _ai_reply(parts, "job_open", {"caller_said": words, "notes": notes}, ())
     return {}
@@ -347,7 +370,25 @@ async def yes_key(state: TalkState, config) -> TalkState:
 
 async def say_note(state: TalkState, config) -> TalkState:
     """A new note from the Thinker, the backend or the Guard: say it the agreed way
-    (fixed line or AI line, 17 Nov 2026), and choose where the call goes next."""
+    (fixed line or AI line, 17 Nov 2026), and choose where the call goes next. It also
+    remembers whether the line said asked the caller something (for job_turn)."""
+    out = await _say_one_note(state, config)
+    if out.pop("skipped", False):
+        return out  # nothing was said: what the caller was last asked still holds
+    note = state["event"]["note"]
+    return {**out, "asked": _asks_caller(note["kind"], note["data"])}
+
+
+def _asks_caller(kind: str, data: dict[str, Any]) -> bool:
+    """Lines that end by asking the caller something: the Thinker's question, its
+    explanation (which offers a person), and "anything else?" after a settled result or a
+    lookup's answer."""
+    return kind in (NEED_INFO, ANSWER, ANSWERED) or (kind == RESULT and data.get("outcome") in ("done", "stopped"))
+
+
+async def _say_one_note(state: TalkState, config) -> dict[str, Any]:
+    """Say one note (see say_note). Returns the graph's update, plus "skipped" when the
+    note was not said at all."""
     parts = _parts(config)
     note = state["event"]["note"]
     kind, data = note["kind"], note["data"]
@@ -357,7 +398,7 @@ async def say_note(state: TalkState, config) -> TalkState:
         parts.hold_plan("")
     if kind in OLD_NEWS_SKIPPED and note.get("version", 0) < parts.version():
         # The caller spoke after this was worked out: it may no longer hold (decision 16).
-        return {"after": state.get("mode", "wait_job")}
+        return {"after": state.get("mode", "wait_job"), "skipped": True}
     if kind == CHECKED_NUMBER:
         # The only number the caller ever hears: the Thinker's checked one (decision 27).
         await _say_fixed(parts, "talk", "number_back", number=note["text"])
@@ -384,15 +425,32 @@ async def say_note(state: TalkState, config) -> TalkState:
         # stays where it was (an answer during the yes moment keeps the yes moment).
         await _say_ai_text(parts, note["text"])
         return {"after": state.get("mode", "wait_job")}
+    if kind == NEED_YES and note.get("version", 0) < parts.version():
+        # The caller spoke while this change was worked out (the owner's rule, 18 Nov 2026:
+        # every caller word reaches the Thinker, whatever its step). Asking it would ask about
+        # old words: food_14 asked for "House 74, Sector 15." after "Gurgaon" had come. The
+        # Thinker is told, so it decides again with the newest words instead of waiting for
+        # a yes to a question never asked. Once asked, the Guard reads the turns instead.
+        _write(parts, YES_DROPPED, note["text"], {"token": data.get("data", {}).get("token", "")})
+        parts.on_step("yes-question dropped", {"question": note["text"], "note_version": note.get("version", 0),
+                                               "job_version": parts.version()})
+        return {"after": state.get("mode", "wait_job"), "skipped": True}
     if kind == NEED_YES:
         await parts.guard.prepared(_as_note(note))
         return {"after": "wait_yes"}
+    if kind == YES_ANSWER and note["text"].startswith("changed:"):
+        # The caller corrected or replaced the change, and the Guard closed the question
+        # (18 Nov 2026). The yes moment is over: the caller's next words are a job turn for the
+        # Thinker, not an answer to a question no longer asked. Nothing is said here; while the
+        # Thinker decides again, the waiting lines play as for any job turn.
+        return {"after": "wait_job", "skipped": True}
     if kind == RESULT:
         # The Guard's result: a fixed line per action and outcome, then "anything else?".
         action, outcome = data.get("action", ""), data.get("outcome", "")
         if f"{action}_{outcome}" in parts.words.values("result"):
             # Said again if the caller cuts it off: a result must be heard (decision 7, 17 Nov).
-            await parts.voice.say(_line(parts, "result", f"{action}_{outcome}"), again_if_cut=True)
+            await parts.voice.say(_result_line(parts, f"{action}_{outcome}", data.get("backend") or {}),
+                                  again_if_cut=True)
         if outcome in ("done", "stopped"):
             # Only when the change is settled. A refused one gets its reason and the offer of a
             # person next (the Thinker explains); an unknown one is still being checked.
@@ -406,7 +464,22 @@ async def say_note(state: TalkState, config) -> TalkState:
     if kind == FAILED:
         await _say_fixed(parts, "talk", "sorry")  # the hand-over follows (decision 14)
         return {"after": "wait_job"}
-    return {"after": state.get("mode", "wait_job")}  # nothing to say for this note
+    return {"after": state.get("mode", "wait_job"), "skipped": True}  # nothing to say for this note
+
+
+def _result_line(parts: TalkerParts, key: str, backend: dict[str, Any]) -> str:
+    """A result's fixed line. When words.yaml has a "<key>_details" line and the backend's
+    answer holds every value it names, that one is said, with the backend's own values ("₹450
+    ka refund bhi ho gaya hai"; 18 Nov 2026, food_01: the refund was never said, and the caller
+    asked twice). A value of "none" counts as missing: a cash order's cancel has no refund."""
+    details = f"{key}_details"
+    if details in parts.words.values("result"):
+        values = {name: str(value) for name, value in backend.items() if str(value).strip().lower() != "none"}
+        try:
+            return _line(parts, "result", details, **values)
+        except KeyError:
+            pass  # a value the line needs is missing: the plain line
+    return _line(parts, "result", key)
 
 
 async def ask_again(state: TalkState, config) -> TalkState:
@@ -552,26 +625,36 @@ class TalkerRunner:
         self._graph = graph
         self._parts = parts
         self._config = {"configurable": {"thread_id": call_id, "parts": parts}, "recursion_limit": 500}
-        self._events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        # Turns, keys, hand-overs and job ends, oldest first. Each remembers how many notes
+        # the notebook had when it came, so notes and events are handled in the order they
+        # happened (see _next).
+        self._events: deque[dict[str, Any]] = deque()
+        self._arrived = asyncio.Event()
         self._seen = 0  # the last note number already turned into an event
         self.mode = ""  # where the call waits now (wait_no_job, wait_collect, wait_job, ...)
 
     def turn(self, words: str, start_ms: int | None = None) -> None:
         """A finished caller turn."""
-        self._events.put_nowait({"kind": TURN, "words": words, "start_ms": start_ms})
+        self._put({"kind": TURN, "words": words, "start_ms": start_ms})
 
     def key(self, digit: str, caller_ms: int = 0) -> None:
         """A key the caller pressed."""
-        self._events.put_nowait({"kind": KEY, "digit": digit, "caller_ms": caller_ms})
+        self._put({"kind": KEY, "digit": digit, "caller_ms": caller_ms})
 
     def hand_over(self, reason: str) -> None:
         """The Thinker pressed the hand-over: say its line and end the call."""
-        self._events.put_nowait({"kind": HAND_OVER, "reason": reason})
+        self._put({"kind": HAND_OVER, "reason": reason})
 
     def job_closed(self, caller_done: bool) -> None:
         """The Thinker's job is over. `caller_done`: the caller said they need nothing more,
         so the call ends with goodbye (decision 13)."""
-        self._events.put_nowait({"kind": JOB_CLOSED, "caller_done": caller_done})
+        self._put({"kind": JOB_CLOSED, "caller_done": caller_done})
+
+    def _put(self, event: dict[str, Any]) -> None:
+        """Queue one event, marked with the notes already written when it happened."""
+        event["notes_before"] = self._parts.notebook.newest
+        self._events.append(event)
+        self._arrived.set()
 
     async def run(self) -> None:
         """Run the call's Talker graph until it ends (goodbye or hand-over)."""
@@ -585,29 +668,41 @@ class TalkerRunner:
         finally:
             SAVER.delete_thread(self._config["configurable"]["thread_id"])
 
+    def _next_note(self) -> Any:
+        """The oldest note not yet handled that is not the Talker's own (own notes are
+        skipped for good). It is not marked handled here: _next does that if it takes it."""
+        for note in self._parts.notebook.after(self._seen):
+            if note.kind not in OWN_NOTES:
+                return note
+            self._seen = note.number
+        return None
+
     async def _next(self, timeout_s: float | None) -> dict[str, Any]:
-        """The next event: a queued one, else a new note, else wait for either (or the time-out)."""
+        """The next thing to handle, in the order things happened: a note written before
+        the oldest queued event comes first. 17 Nov 2026, run 4, food_01: queued caller turns
+        always went first, the caller kept talking while each slow reply took 7-17 s, and the
+        Thinker's plan and yes-question waited behind the pile until the caller hung up.
+        With nothing queued: wait for either (or the time-out)."""
         loop = asyncio.get_running_loop()
         deadline = None if timeout_s is None else loop.time() + timeout_s
         while True:
-            if not self._events.empty():
-                return self._events.get_nowait()
-            for note in self._parts.notebook.after(self._seen):
+            note = self._next_note()
+            if self._events and (note is None or note.number > self._events[0]["notes_before"]):
+                return self._events.popleft()
+            if note is not None:
                 self._seen = note.number
-                if note.kind not in OWN_NOTES:
-                    return {"kind": NOTE, "note": {"number": note.number, "kind": note.kind, "text": note.text,
-                                                   "version": note.version, "data": dict(note.data)}}
+                return {"kind": NOTE, "note": {"number": note.number, "kind": note.kind, "text": note.text,
+                                               "version": note.version, "data": dict(note.data)}}
             left = None if deadline is None else deadline - loop.time()
             if left is not None and left <= 0:
                 return {"kind": TIMEOUT}
             # Wake on whichever comes first: a queued event or a new note.
-            get = asyncio.ensure_future(self._events.get())
+            self._arrived.clear()
+            arrived = asyncio.ensure_future(self._arrived.wait())
             bell = asyncio.ensure_future(self._parts.notebook.wait(1.0))
-            done, pending = await asyncio.wait({get, bell}, timeout=left, return_when=asyncio.FIRST_COMPLETED)
-            for task in pending:
+            await asyncio.wait({arrived, bell}, timeout=left, return_when=asyncio.FIRST_COMPLETED)
+            for task in (arrived, bell):
                 task.cancel()
-            if get in done:
-                return get.result()
 
 
 # Built once, when the program starts.

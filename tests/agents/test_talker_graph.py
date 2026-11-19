@@ -9,6 +9,8 @@ gets a real yes-ticket and presses the real confirm.
 from __future__ import annotations
 
 import asyncio
+
+import pytest
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,8 @@ from agents.agent_c.notebook import (
     PLAN,
     REQUEST,
     RESULT,
+    YES_ANSWER,
+    YES_DROPPED,
     Notebook,
 )
 from agents.agent_c.talker.graph import TALKER_GRAPH, TalkerParts, TalkerRunner
@@ -398,7 +402,7 @@ async def test_a_whole_cancel_call_end_to_end(open_call):
     kit = await open_call(FoodPack())
     opening = "Mujhe order cancel karna hai, number chaar paanch do ek"
     talker_ai = ScriptedTalkerAI(no_job=[("open_job", [])], collect=[("heard_number", [])],
-                                 job_open=[(REPLY, ["Ji, theek hai."])])
+                                 job_open=[])  # "anything else?" was asked: no reply to the answer
     thinker_ai = ScriptedAI(check_number=[{"exit": "ok", "number": "4521"}], work_left=[{"exit": "done"}],
                             decide=[{"exit": "prepare", "tool": "prepare_cancel_order", "inputs": {},
                                      "plan": "Aapka order cancel kar raha hoon."}])
@@ -411,8 +415,7 @@ async def test_a_whole_cancel_call_end_to_end(open_call):
         line("talk", "number_back", number="4521"),
         line("talk", "order_found", number="4521", status=WORDS.phrase("status", "preparing", "hinglish")),
         "Aapka order cancel kar raha hoon.",
-        line("result", "cancel_order_done"), line("talk", "anything_else"),
-        "Ji, theek hai.", line("talk", "goodbye")]
+        line("result", "cancel_order_done"), line("talk", "anything_else"), line("talk", "goodbye")]
     assert call.ended == ["the caller said goodbye"]
 
 
@@ -468,3 +471,159 @@ async def test_an_amount_that_is_not_the_changes_own_is_never_said():
     assert call.voice.said[-1] == line("line", "safe")  # 380 is the order's total, not this refund
     await call.note(ANSWER, "Raita ke liye ₹40 wapas aayenge.")
     assert call.voice.said[-1] == "Raita ke liye ₹40 wapas aayenge."  # the change's own amount
+
+
+async def test_notes_and_turns_are_handled_in_the_order_they_came():
+    # 17 Nov 2026, run 4, food_01: caller turns always went before new notes. The caller kept
+    # talking while each slow reply took 7-17 s, so the yes-question waited behind the pile of
+    # turns until the caller hung up. A turn that came after a note now waits for that note.
+    call = Call(ScriptedTalkerAI(no_job=[("open_job", [])], collect=[("heard_number", [])]),
+                finder(**{"4521": order("4521")}))
+    await call.start()
+    await call.turn("4521")
+    call.notebook.add(PLAN, "Order cancel kar raha hoon.", 1)
+    call.notebook.add(NEED_YES, "cancel order 4521", 1, {"tool": "prepare_cancel_order", "data": {"token": "t"}})
+    call.runner.turn("Haan, kar do")  # both waiting at once, the turn last
+    await call.settle()
+    assert len(call.guard.prepared_notes) == 1  # the yes moment began first...
+    assert call.guard.answers == ["Haan, kar do"]  # ...so the turn went to the Guard, not to a reply
+
+
+async def test_a_number_in_digits_goes_to_the_finder_without_the_ais_guess():
+    # 17 Nov 2026, run 5, food_03: the AI missed "Order number 4512" and asked for the number
+    # again. A whole number in digits now goes straight to the finder (no "collect" answer is
+    # scripted, so asking the AI would fail this test).
+    words = "Order number 4512, Priya Sharma"
+    call = Call(ScriptedTalkerAI(no_job=[("open_job", [])], collect=[]), finder(**{words: order("4512")}))
+    await call.start()
+    await call.turn(words)
+    assert call.kinds() == [REQUEST, ORDER_NUMBER] and call.notebook.notes[1].data["digits"] == "4512"
+    assert call.voice.said[-1] == line("talk", "number_heard")
+
+
+async def test_the_answer_to_a_question_gets_no_talker_reply_unless_it_asks_back():
+    # 17 Nov 2026, run 5, food_04: an address split into two turns got a Talker reply each,
+    # and the robot never left the caller a gap. After the Thinker's question the caller's
+    # words go to the Thinker only; a question back ("?") still gets a reply.
+    call = Call(ScriptedTalkerAI(no_job=[("open_job", [])], collect=[("heard_number", [])],
+                                 job_open=[(REPLY, ["Ji, naya address bata dijiye."])]),
+                finder(**{"4561": order("4561")}))
+    await call.start()
+    await call.turn("4561")
+    await call.note(NEED_INFO, "Naya address kya hai?", {"need": "new_address"})
+    said = len(call.voice.said)
+    await call.turn("Flat 2C")
+    await call.turn("Rose Apartments, Model Town")
+    assert len(call.voice.said) == said  # quiet: the Thinker answers next
+    assert [n.text for n in call.notebook.notes if n.kind == CALLER][-2:] == ["Flat 2C", "Rose Apartments, Model Town"]
+    await call.turn("Pin code bhi chahiye?")
+    assert call.voice.said[-1] == "Ji, naya address bata dijiye."  # a question back is answered
+
+
+async def test_a_yes_question_worked_out_before_the_callers_newest_turn_is_dropped():
+    # 18 Nov 2026, food_14: "Gurgaon" came while "decide" worked on "House 74, Sector 15.", and
+    # the yes-question asked for the address without it. The owner's rule: every caller word
+    # reaches the Thinker, whatever its step. A question older than the newest turn is not
+    # asked; the Thinker is told (a yes_dropped note), so it decides again. One worked out
+    # after the turn is asked as before.
+    call = Call(ScriptedTalkerAI(no_job=[("open_job", [])], collect=[("heard_number", [])]),
+                finder(**{"4561": order("4561")}))
+    version = {"now": 1}
+    call.parts.version = lambda: version["now"]
+    call.parts.new_turn = lambda: version.__setitem__("now", version["now"] + 1)
+    await call.start()
+    await call.turn("4561")
+    await call.note(NEED_INFO, "Naya address kya hai?", {"need": "new_address"})
+    await call.turn("House 74, Sector 15.")  # the job's version is now 2...
+    worked_out_at = version["now"]
+    await call.turn("Gurgaon")  # ...and 3: said while "decide" thought
+    call.notebook.add(NEED_YES, "address badal kar House 74, Sector 15. kar doon?", worked_out_at,
+                      {"tool": "prepare_change_address", "data": {"token": "t1"}})
+    await call.settle()
+    assert call.guard.prepared_notes == []  # never asked
+    dropped = [n for n in call.notebook.notes if n.kind == YES_DROPPED]
+    assert len(dropped) == 1 and dropped[0].data == {"token": "t1"}
+    call.notebook.add(NEED_YES, "address badal kar House 74, Sector 15, Gurgaon kar doon?", version["now"],
+                      {"tool": "prepare_change_address", "data": {"token": "t2"}})
+    await call.settle()
+    assert [n.text for n in call.guard.prepared_notes] == ["address badal kar House 74, Sector 15, Gurgaon kar doon?"]
+
+
+async def test_a_result_says_the_backends_refund_when_there_is_one():
+    # 18 Nov 2026, food_01: "Aapka order cancel ho gaya hai" only; the caller then asked twice
+    # whether the refund went through. The backend's own amount is said when it has one; a cash
+    # order (refund "none") keeps the plain line.
+    call = Call(ScriptedTalkerAI(no_job=[("open_job", [])], collect=[("heard_number", [])]),
+                finder(**{"4521": order("4521")}))
+    await call.start()
+    await call.turn("4521")
+    await call.note(RESULT, "cancel_order: done, status cancelled, refund ₹450",
+                    {"action": "cancel_order", "outcome": "done",
+                     "backend": {"order_no": 4521, "status": "cancelled", "refund": "₹450"}})
+    assert line("result", "cancel_order_done_details", refund="₹450") in call.voice.said
+    await call.note(RESULT, "cancel_order: done, status cancelled, refund none",
+                    {"action": "cancel_order", "outcome": "done",
+                     "backend": {"order_no": 4521, "status": "cancelled", "refund": "none"}})
+    assert call.voice.said[-2] == line("result", "cancel_order_done")  # then "anything else?"
+
+
+async def test_after_a_changed_answer_the_call_leaves_the_yes_moment():
+    # 18 Nov 2026: the Guard closed the question because the caller corrected the change. The
+    # caller's next words are a job turn for the Thinker, not an answer to a closed question.
+    call = Call(ScriptedTalkerAI(no_job=[("open_job", [])], collect=[("heard_number", [])]),
+                finder(**{"4561": order("4561")}))
+    await call.start()
+    await call.turn("4561")
+    await call.note(NEED_YES, "address badal kar Flat do si kar doon?", {"tool": "prepare_change_address",
+                                                                          "data": {"token": "t"}})
+    assert call.runner.mode == "wait_yes"
+    await call.turn("Flat 2C, Rose Apartments")  # the correction: to the Guard, as in the yes moment
+    await call.note(YES_ANSWER, "changed: Flat 2C, Rose Apartments")
+    assert call.runner.mode == "wait_job"
+    await call.turn("Model Town, Ludhiana")
+    assert call.guard.answers == ["Flat 2C, Rose Apartments"]  # the later turn did not go to the Guard
+    assert [n.text for n in call.notebook.notes if n.kind == CALLER][-1] == "Model Town, Ludhiana"
+
+
+class KeyAI:
+    """One key's Talker AI: raises the given error, or answers (saying `sentences` first)."""
+
+    def __init__(self, error: Exception | None = None, sentences: tuple[str, ...] = ()) -> None:
+        self.error, self.sentences, self.asked = error, sentences, 0
+
+    async def reply(self, step, facts, exits, speak):
+        self.asked += 1
+        for sentence in self.sentences:
+            await speak(sentence)
+        if self.error is not None:
+            raise self.error
+        return REPLY
+
+
+async def test_the_talker_moves_to_the_next_key_when_its_own_is_used_up():
+    # 17 Nov 2026, run 6, food_04: the Talker's key hit its daily quota and every reply failed.
+    from agents.agent_c.talker.talker_ai import FailoverTalkerAI
+    used_up, spare = KeyAI(RuntimeError("429 RESOURCE_EXHAUSTED. You exceeded your current quota")), KeyAI()
+    switches: list[str] = []
+    ai = FailoverTalkerAI([used_up, spare], on_switch=switches.append)
+
+    async def speak(sentence):
+        pass
+
+    assert await ai.reply("no_job", {}, (), speak) == REPLY
+    assert await ai.reply("no_job", {}, (), speak) == REPLY
+    assert (used_up.asked, spare.asked, len(switches)) == (1, 2, 1)  # moved once, for good
+
+
+async def test_the_talker_keeps_its_key_on_other_errors_and_never_repeats_a_half_reply():
+    from agents.agent_c.talker.talker_ai import FailoverTalkerAI
+
+    async def speak(sentence):
+        pass
+
+    broken = FailoverTalkerAI([KeyAI(TimeoutError("slow")), KeyAI()])
+    with pytest.raises(TimeoutError):  # not a quota answer: the graph's own retry handles it
+        await broken.reply("no_job", {}, (), speak)
+    half = FailoverTalkerAI([KeyAI(RuntimeError("429"), sentences=("Ji,",)), KeyAI()])
+    with pytest.raises(RuntimeError):  # part was said: a new key would say it twice
+        await half.reply("no_job", {}, (), speak)

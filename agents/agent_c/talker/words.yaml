@@ -34,6 +34,11 @@ result:
   cancel_order_done:
     hinglish: "Aapka order cancel ho gaya hai."
     english: "Your order has been cancelled."
+  # The same, with the backend's own refund (18 Nov 2026): said when the cancel's answer has a
+  # refund amount; a cash order (refund "none") gets the plain line above.
+  cancel_order_done_details:
+    hinglish: "Aapka order cancel ho gaya hai, aur {refund} ka refund bhi ho gaya hai."
+    english: "Your order has been cancelled, and a refund of {refund} has been made."
   cancel_order_refused:
     hinglish: "Order cancel nahi hua."
     english: "The order could not be cancelled."
@@ -46,6 +51,9 @@ result:
   refund_order_done:
     hinglish: "Refund ho gaya hai."
     english: "The refund has been sent."
+  refund_order_done_details:  # with the backend's own amount (18 Nov 2026)
+    hinglish: "{refunded} ka refund ho gaya hai."
+    english: "A refund of {refunded} has been sent."
   refund_order_refused:
     hinglish: "Refund nahi hua."
     english: "The refund could not be sent."

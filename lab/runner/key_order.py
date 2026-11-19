@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from common.env import GEMINI_KEY_CHOICE, GEMINI_POOL_CHOICE, GROQ_KEY_CHOICE, SARVAM_KEY_CHOICE
+from common.env import GEMINI_KEY_CHOICE, GEMINI_POOL_CHOICE, GROQ_KEY_CHOICE, GROQ_POOL_CHOICE, SARVAM_KEY_CHOICE
 
 ORDER_FILE = Path(__file__).resolve().parents[1] / "key_order.yaml"
 
@@ -26,6 +26,11 @@ ORDER_FILE = Path(__file__).resolve().parents[1] / "key_order.yaml"
 CHOICE_OF = {"gemini": GEMINI_KEY_CHOICE, "sarvam": SARVAM_KEY_CHOICE, "groq": GROQ_KEY_CHOICE}
 # Services whose robots can take turns over several keys, and the variable naming them all.
 POOL_OF = {"gemini": GEMINI_POOL_CHOICE}
+# Single-key services whose whole list, the chosen key first, is also handed to robots that
+# move to the next key on a refusal (Agent C's Groq "decide" step, 17 Nov 2026). Keys the
+# caller used up stay in, at the end: Groq counts limits per model, so a key full for the
+# caller's model may still serve the robot's.
+LIST_OF = {"groq": GROQ_POOL_CHOICE}
 
 
 def load_order(path: Path = ORDER_FILE) -> tuple[dict[str, list[str]], set[str]]:
@@ -120,4 +125,6 @@ class KeyOrder:
             if self._at.get(service) != at:
                 self.say(f"{service}: using {names[at]}")
             self._at[service] = at
+            if service in LIST_OF:
+                os.environ[LIST_OF[service]] = ",".join(names[at:] + names[:at])
         return problems

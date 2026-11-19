@@ -15,13 +15,14 @@ with Agent A, so a comparison measures the design, not the parts. What differs:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import httpx
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -32,11 +33,12 @@ from pipecat.services.sarvam.stt import SarvamRealtimeSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy, VADUserTurnStartStrategy
+from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 from agents.agent_c.call_job import CallJob
 from agents.agent_c.guard.guard import Door, Guard, GuardSettings
-from agents.agent_c.guard.judge import TimedJudge, YesJudge, first_answer, gemini_ask
+from agents.agent_c.guard.judge import TimedJudge, YesJudge, first_answer, gemini_ask, groq_ask
 from agents.agent_c.guard.partial_words import PartialWords
 from agents.agent_c.notebook import FAILED, Note, Notebook
 from agents.agent_c.settings import AgentCSettings
@@ -50,16 +52,19 @@ from agents.agent_c.talker.quiet_watch import CallView, QuietWatch
 from agents.agent_c.talker.voice_spelling import spell_for_voice
 from agents.agent_c.talker.number_finder import FindNumbers, sarvam_find
 from agents.agent_c.talker.speech_watch import SpeechWatch
-from agents.agent_c.talker.talker_ai import GeminiTalkerAI, TalkerAI
+from agents.agent_c.talker.talker_ai import FailoverTalkerAI, GeminiTalkerAI, GroqTalkerAI, TalkerAI
 from agents.agent_c.thinker.graph import THINKER_GRAPH, ThinkerParts, run_job
-from agents.agent_c.thinker.step_brain import GeminiStepBrain, StepBrain
+from agents.agent_c.thinker.address_check import AddressCheck, JevAddressCheck
+from agents.agent_c.thinker.step_brain import GeminiStepBrain, GroqStepBrain, StepBrain, StepRouter
 from agents.common.call_box import CallBox, CallBoxSettings, CallResult
 from agents.common.diary import NO_DIARY, Diary
 from agents.common.pipecat_brain_cap import BRAIN_CAP, BrainCap
 from agents.common.pipecat_diary import DiaryObserver
 from agents.common.pipecat_line import LineTransport
 from agents.common.tools import Tools
+from agents.common.ai_log import AiLog
 from common.google import GOOGLE_MIN_TIMEOUT_S, ClientRing, google_client
+from common.groq import groq_client
 from common.sarvam import sarvam_client
 from common.wire.protocol import PIECE_MS, SAMPLE_RATE, Cleared, End, Key, Played
 from common.wire.robot_line import CallerAudio, LineClosed, RobotLine
@@ -69,22 +74,43 @@ from engine.service.tool_catalog import CONFIRM, ToolSpec
 WORDS = Path(__file__).resolve().parent / "talker" / "words.yaml"
 JUDGE_PROMPT = Path(__file__).resolve().parent / "guard" / "prompts" / "judge.md"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+GROQ = "groq"  # a provider name in settings.yaml (talker.provider, thinker.provider, guard.judge_provider)
+JEV = "jev"  # the address check's provider name in settings.yaml (address_check.provider)
 HANDED_OVER = "handed_over"
 
 
 @dataclass(frozen=True)
 class Keys:
-    gemini: str  # the Talker's own key
-    sarvam: str
+    # Every key field is left out of repr (18 Nov 2026): a printed Keys, in an error or a log,
+    # must never show a key.
+    gemini: str = field(repr=False)  # the Talker's own key
+    sarvam: str = field(repr=False)
     # Every working Gemini key when the lab rotates them (lab/key_order.yaml): the Thinker's
     # and judge's requests take turns over all but the Talker's, so the Talker keeps its own
     # 15 a minute. Empty: everything on `gemini`.
-    gemini_pool: tuple[str, ...] = ()
+    gemini_pool: tuple[str, ...] = field(default=(), repr=False)
+    # Every Groq key, the lab's current one first (lab/key_order.yaml): the Thinker's "decide"
+    # step starts on the first and moves on when one is refused (17 Nov 2026). Empty: "decide"
+    # stays on Gemini like every other step.
+    groq_pool: tuple[str, ...] = field(default=(), repr=False)
+    # {key: its .env name} (common/env.py key_names), so the AI request log can say which key
+    # a request used without writing the key (18 Nov 2026). Never printed: repr=False.
+    names: Mapping[str, str] = field(default_factory=dict, repr=False)
+    # The address check's key (TypeSafe Jev, 19 Nov 2026). Empty: no check.
+    jev: str = field(default="", repr=False)
 
     def back_office(self) -> list[str]:
         """The keys the Thinker and judge take turns over."""
         others = [key for key in self.gemini_pool if key != self.gemini]
         return others or [self.gemini]
+
+    def name(self, key: str) -> str:
+        """The key's .env name, or "" when it has none (a test key)."""
+        return self.names.get(key, "")
+
+    def all(self) -> list[str]:
+        """Every key held, to scrub out of anything logged."""
+        return [self.gemini, self.sarvam, *self.gemini_pool, *self.groq_pool, self.jev]
 
 
 def thinker_tools(catalog: Sequence[ToolSpec]) -> list[ToolSpec]:
@@ -96,6 +122,17 @@ def thinker_tools(catalog: Sequence[ToolSpec]) -> list[ToolSpec]:
         raise ValueError("Agent C needs safe mode: without confirm, the Thinker's tools could change orders unchecked")
     return [spec for spec in catalog if spec.name != CONFIRM]
 
+
+
+_TLS: list[Any] = []
+
+
+def _shared_tls() -> Any:
+    """One secure-connection setup for the program, made on first use and kept."""
+    if not _TLS:
+        import ssl
+        _TLS.append(ssl.create_default_context())
+    return _TLS[0]
 
 class CountedTalkerAI:
     """Counts each Talker AI request against the call's brain cap (decision 19)."""
@@ -131,6 +168,9 @@ class AgentC:
         self._tools = tools
         self._box_settings = box_settings
         self._diary = diary
+        # One diary row per AI request (service, key name, time, outcome, the service's reason;
+        # 18 Nov 2026: 17 Talker timeouts in one run, and nothing said which key or why).
+        self._ai_log = AiLog(diary.decision, secrets=keys.all())
         self._max_brain_requests = max_brain_requests  # the lab passes its own (lab/settings.yaml)
         self._words = words or SpokenWords()  # the call's pack's spoken words (cli/agent_c.py)
         # The Guard's private door, from cli/agent_c.py: plain code only, never a tool (decision 7).
@@ -184,7 +224,10 @@ class AgentC:
         call.box, call.line, call.task, call.tools = box, line, task, self._tools
         talker_ai = CountedTalkerAI(self._talker_ai or self._gemini_talker(), cap)
         thinker_ai = CountedStepBrain(self._thinker_ai or self._gemini_thinker(), cap)
-        find = self._find_numbers or call.real_finder(self._keys.sarvam, self._settings.section("number_finder"))
+        check_settings = self._settings.section("address_check")
+        address_check = self._address_check(check_settings)
+        find = self._find_numbers or call.real_finder(self._keys.sarvam, self._settings.section("number_finder"),
+                                                        self._ai_log, self._keys.name(self._keys.sarvam))
 
         def start_thinker() -> None:
             """The Talker opened a job: run its Thinker graph beside the pipeline. A crash
@@ -193,9 +236,16 @@ class AgentC:
             parts = ThinkerParts(call.notebook, self._tools, thinker_ai, call.hand_over, menu,
                                  version=lambda: call.job.version, step_s=float(limits["step_s"]),
                                  retries=int(limits["step_retries"]), same_call_limit=int(limits["same_call_limit"]),
+                                 ai_retries=int(limits["step_ai_retries"]),
+                                 redecide_limit=int(limits["redecide_limit"]),
+                                 on_try_failed=lambda step, reason: self._diary.decision("thinker try failed",
+                                                                                         step=step, reason=reason),
                                  language=lambda: call.language.value,
                                  on_step=lambda step, answer: self._diary.decision("thinker step", step=step,
-                                                                                   answer=answer))
+                                                                                   answer=answer),
+                                 check_address=address_check,
+                                 checked_inputs=tuple(check_settings.get("inputs") or ()),
+                                 address_line=float(check_settings.get("line", 0.5)))
             seen = call.notebook.newest  # this job's notes start after the job note
             call.thinker = parts
 
@@ -235,28 +285,82 @@ class AgentC:
         if self._judge is not None:
             return self._judge
         section = self._settings.section("guard")
-        # Gemini's own minimum deadline; the judge's own limit is held by TimedJudge.
-        client = self._ring(max(float(section["judge_s"]), GOOGLE_MIN_TIMEOUT_S))
         racers = int(section["judge_racers"])
+        prompt = JUDGE_PROMPT.read_text(encoding="utf-8")
         # The same question on several keys at once, first answer wins: each racer takes
         # the ring's next client, so each goes out on its own key.
-        ask = first_answer(gemini_ask(client, section["judge_model"], JUDGE_PROMPT.read_text(encoding="utf-8")), racers)
-        return TimedJudge(ask, float(section["judge_s"]), lambda: cap.add(racers), self._diary.error)
+        if section.get("judge_provider") == GROQ and self._keys.groq_pool:
+            ask = groq_ask(self._groq_ring(float(section["judge_s"])), section["judge_model"], prompt, self._ai_log,
+                           section.get("judge_options"))
+        else:
+            # Gemini's own minimum deadline; the judge's own limit is held by TimedJudge.
+            client = self._ring(max(float(section["judge_s"]), GOOGLE_MIN_TIMEOUT_S))
+            ask = gemini_ask(client, section["judge_model"], prompt, self._ai_log)
+        return TimedJudge(first_answer(ask, racers), float(section["judge_s"]), lambda: cap.add(racers),
+                          self._diary.error)
+
+    def _address_check(self, section: dict[str, Any]) -> AddressCheck | None:
+        """The address check for this call (thinker/address_check.py), or None: no Jev key, or
+        a provider this robot doesn't know. Tests give their own through the Thinker's parts."""
+        if section.get("provider") != JEV or not self._keys.jev:
+            return None
+        limit_s = float(section["check_s"])
+        client = httpx.AsyncClient(headers={"Authorization": f"Bearer {self._keys.jev}", "Content-Type": "application/json"},
+                                   timeout=limit_s, verify=_shared_tls())
+        return JevAddressCheck(client, str(section["model"]), limit_s, self._keys.name(self._keys.jev), self._ai_log,
+                               on_error=self._diary.error)
+
+    def _groq_ring(self, timeout_s: float) -> ClientRing:
+        """One Groq client per key, the lab's current key first, taking turns request by request."""
+        keys = list(self._keys.groq_pool)
+        return ClientRing([groq_client(key, timeout_s, verify=_shared_tls()) for key in keys],
+                          [self._keys.name(key) for key in keys])
 
     def _ring(self, timeout_s: float) -> ClientRing:
         """One client per back-office key, taking turns request by request."""
-        return ClientRing([google_client(key, timeout_s) for key in self._keys.back_office()])
+        keys = self._keys.back_office()
+        return ClientRing([google_client(key, timeout_s) for key in keys], [self._keys.name(key) for key in keys])
 
     def _gemini_talker(self) -> TalkerAI:
-        """The Talker's AI on its own key (Gemini's minimum deadline; the graph holds its own limit)."""
+        """The Talker's AI on its own key, then the other keys if that one is refused for
+        quota (Gemini's minimum deadline; the graph holds its own limit). On Groq when
+        settings.yaml talker.provider says so (18 Nov 2026), over the Groq keys the same way."""
         reply_s = float(self._settings.section("talker_graph")["reply_s"])
-        return GeminiTalkerAI(google_client(self._keys.gemini, max(reply_s, GOOGLE_MIN_TIMEOUT_S)),
-                              self._settings.talker["model"])
+        talker = self._settings.talker
+        if talker.get("provider") == GROQ and self._keys.groq_pool:
+            ais = [GroqTalkerAI(groq_client(key, reply_s, verify=_shared_tls()), talker["model"], self._keys.name(key),
+                                self._ai_log, talker.get("options")) for key in self._keys.groq_pool]
+            return FailoverTalkerAI(ais, on_switch=lambda why: self._diary.decision("talker key changed", why=why))
+        keys = [self._keys.gemini, *[key for key in self._keys.back_office() if key != self._keys.gemini]]
+        ais = [GeminiTalkerAI(google_client(key, max(reply_s, GOOGLE_MIN_TIMEOUT_S)), self._settings.talker["model"],
+                              self._keys.name(key), self._ai_log)
+               for key in keys]
+        return FailoverTalkerAI(ais, on_switch=lambda why: self._diary.decision("talker key changed", why=why))
 
     def _gemini_thinker(self) -> StepBrain:
-        """The Thinker's AI, taking turns over the back-office keys."""
+        """The Thinker's AI: every step on Gemini, taking turns over the back-office keys,
+        except "decide", which runs on Groq when the robot holds Groq keys (17 Nov 2026,
+        the owner's choice; settings.yaml thinker.decide_model says why)."""
         step_s = float(self._settings.section("thinker_limits")["step_s"])
-        return GeminiStepBrain(self._ring(max(step_s, GOOGLE_MIN_TIMEOUT_S)), self._settings.thinker["model"])
+        thinker = self._settings.thinker
+        model = thinker.get("decide_model")
+        if not self._keys.groq_pool:
+            return GeminiStepBrain(self._ring(max(step_s, GOOGLE_MIN_TIMEOUT_S)), thinker["model"], self._ai_log)
+        # One secure-connection setup for every key: making one reads the computer's
+        # certificates and freezes the loop for tens of ms (lab/ears_test/services.py).
+        tls = _shared_tls()
+        names = [self._keys.name(key) for key in self._keys.groq_pool]
+
+        def groq(model_name: str) -> GroqStepBrain:
+            clients = [groq_client(key, step_s, verify=tls) for key in self._keys.groq_pool]
+            return GroqStepBrain(clients, str(model_name), names=names, log=self._ai_log,
+                                 on_switch=lambda why: self._diary.decision("thinker key changed", why=why))
+
+        # The small steps on Groq too when thinker.provider says so (18 Nov 2026): Gemini took
+        # 6-8 s a request that evening, over the 10 s step limit with a retry.
+        small = (groq(thinker["model"]) if thinker.get("provider") == GROQ
+                 else GeminiStepBrain(self._ring(max(step_s, GOOGLE_MIN_TIMEOUT_S)), thinker["model"], self._ai_log))
+        return StepRouter(small, {"decide": groq(model)}) if model else small
 
     def pipeline(self, transport: LineTransport, call: CallParts) -> Pipeline:
         """Ears -> turn detection -> voice. No brain in between: a finished turn goes to the
@@ -270,13 +374,21 @@ class AgentC:
         voice = SarvamTTSService(api_key=self._keys.sarvam, sample_rate=SAMPLE_RATE,
                                  settings=SarvamTTSService.Settings(model=s.voice["model"], voice=s.voice["speaker"],
                                                                     language=Language(s.voice["language"])))
-        user_params = LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer())
+        # The turn ends after this much quiet in total. The voice detector already waits
+        # VAD_STOP_SECS of it before saying "stopped", and the timer starts only then.
+        # 18 Nov 2026 (the owner's choice, decision 25 on hold): until now Pipecat's default
+        # Smart Turn decided, and on 187 real lab caller lines it cut the caller off at 65
+        # of 90 pauses inside a sentence ("House 74, Sector 15," | "Gurgaon").
+        quiet_s = float(s.section("turn_end")["quiet_s"])
+        stop = [SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=max(0.0, quiet_s - VAD_STOP_SECS))]
+        user_params = LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer(),
+                                              user_turn_strategies=UserTurnStrategies(stop=stop))
         if call.stop_listener is not None:
             # Decision 26: the caller's sound never stops the voice by itself; only the
             # stop-or-keep model does, through the stop switch.
             user_params = LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer(), user_turn_strategies=UserTurnStrategies(
                 start=[VADUserTurnStartStrategy(enable_interruptions=False),
-                       TranscriptionUserTurnStartStrategy(enable_interruptions=False)]))
+                       TranscriptionUserTurnStartStrategy(enable_interruptions=False)], stop=stop))
         # Pipecat's turn collector, kept only to know when a caller turn begins and ends.
         turns = LLMContextAggregatorPair(LLMContext(), user_params=user_params)
 
@@ -353,6 +465,8 @@ class CallParts:
         self._handed_over = False
         self._last_line = ""
         self._last_said_at = -1e9  # when the last line was sent to the voice (the loop's clock)
+        self._live_sent_at = -1e9  # when the last line went to the live voice (not a clip)
+        self._clip_after_live = -1e9  # when a clip last waited for the live line before it
         self._speech_ended_at = -1e9  # when the voice last stopped (the loop's clock)
         self.clips = clips or {}  # each fixed line's pre-made clip, by its words
         self.clip_out = ClipOut(name="clip-out")
@@ -393,12 +507,35 @@ class CallParts:
         question's last words with what the voice said."""
         self._diary.said(said or text, filled=text)
         self._last_line = text
-        self._last_said_at = asyncio.get_running_loop().time()
+        loop = asyncio.get_running_loop()
         sound = self.clips.get(text) if clip else None
         if sound is not None:
+            await self._after_live_line()
+            self._last_said_at = loop.time()
             await self.clip_out.play(sound, text)
         elif self.task is not None:
+            self._last_said_at = self._live_sent_at = loop.time()
             await self.task.queue_frames([TTSSpeakFrame(text)])
+
+    async def _after_live_line(self) -> None:
+        """A clip goes out at once, but a live line takes ~1 s to be made: a clip sent right
+        after one would play first. 18 Nov 2026, food_01: the caller heard "Aur kuch madad kar
+        sakta hoon?" (a clip) before "Aapka order cancel ho gaya hai, aur ₹450 ka refund..."
+        (live, as it holds the amount). So a clip waits until the live line sent before it has
+        started and finished (at most question_wait_s): lines are heard in the order sent."""
+        if self._live_sent_at <= self._clip_after_live:
+            return  # no live line since the last clip waited: nothing to fall behind
+        speed = self._settings.section("speed")
+        grace_s, most_s = float(speed["reply_grace_s"]), float(speed["question_wait_s"])
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + most_s
+        # 1. Until the live line starts playing (or it had its ~1 s to start and didn't).
+        while loop.time() < deadline and not self.speech.speaking and loop.time() - self._live_sent_at < grace_s:
+            await asyncio.sleep(0.05)
+        # 2. Until it has played to its end.
+        while loop.time() < deadline and self.speech.speaking:
+            await asyncio.sleep(0.05)
+        self._clip_after_live = loop.time()
 
     async def say_question(self, text: str) -> None:
         """The Guard's yes-question, as its own turn: it waits until the robot is quiet
@@ -486,10 +623,11 @@ class CallParts:
         if self.box is not None:
             self.box.end(reason)
 
-    def real_finder(self, sarvam_key: str, section: dict[str, Any]) -> FindNumbers:
+    def real_finder(self, sarvam_key: str, section: dict[str, Any], log: AiLog | None = None,
+                    key_name: str = "") -> FindNumbers:
         """The number finder on Sarvam, one client per call (closed with it)."""
         self.finder_client = sarvam_client(sarvam_key, float(section["try_s"]))
-        return sarvam_find(self.finder_client, str(section["model"]))
+        return sarvam_find(self.finder_client, str(section["model"]), log=log, key=key_name)
 
     # ---- hand-over and crashes -------------------------------------------------------------
 
@@ -538,6 +676,10 @@ class CallParts:
         """A finished caller turn: to the Guard (it answers a yes-question with its own
         timing) and to the Talker graph."""
         self.caller_talking = False
+        # Where each turn ended, in the diary: the ears' "heard" rows are their own pieces, so
+        # without this nobody could count how often one sentence was handed on as two turns
+        # (18 Nov 2026, the end-of-turn change).
+        self._diary.decision("caller turn", words=words)
         if self.stop_listener is not None:
             self.stop_listener.turn_finished()
         self.language.turn_finished(words)

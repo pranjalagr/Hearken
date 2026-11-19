@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 from engine.storage.database import Database
 from engine.tasks.records import Change, Snapshot, changes, take_snapshot
-from engine.tasks.task_file import Expectation, Task
+from engine.tasks.task_file import Allowed, Expectation, Task
 
 
 @dataclass
@@ -72,7 +72,10 @@ def is_expected(change: Change, task: Task) -> bool:
     """A change is one the task expects if an `expect` item names its row,
     and, for a changed row, lists every column that changed. Otherwise a
     robot that cancels the right order and also edits its address would
-    slip through, because the order's row is named."""
+    slip through, because the order's row is named. A row an `allow` item
+    names may change too (19 Nov 2026: food_02's hand-over)."""
+    if any(_names(allowed, change) for allowed in task.allow):
+        return True
     for item in task.expect:
         if not _names(item, change) or item.count == 0:
             # A count-0 item ("no refund for order 4568") names rows that must
@@ -85,6 +88,6 @@ def is_expected(change: Change, task: Task) -> bool:
     return False
 
 
-def _names(item: Expectation, change: Change) -> bool:
+def _names(item: Expectation | Allowed, change: Change) -> bool:
     row = change.row
     return item.table == change.table and all(row.get(column) == value for column, value in item.where.items())

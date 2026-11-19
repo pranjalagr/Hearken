@@ -269,9 +269,7 @@ Watching every call line by line found problems no unit test showed. Each one is
 |---|---|
 | Voice pipeline | Pipecat |
 | Agent graphs | LangGraph |
-| AI, Agent C (talking and thinking) | gpt-oss-120b on Groq |
-| AI, the yes judge | qwen3.8-27b on Groq |
-| AI, the address check | TypeSafe Jev |
+| AI (talking, thinking, the yes judge) | Gemini Flash-Lite |
 | Speech-to-text, voice, number finder | Sarvam (saaras v3, bulbul v4, sarvam-105b) |
 | "haan" vs "ruko" model | own model (ONNX), trained on machine voices and real Hindi phone calls |
 | Backend and tools | Python, SQLite, MCP |

@@ -35,6 +35,9 @@ class AgentCSettings:
         check = self.raw.get("address_check") or {}
         if check.get("model"):
             models["address_check"] = f"{check.get('provider', '')} {check['model']}"  # 19 Nov 2026
+        yes_check = self.raw.get("yes_check") or {}
+        if yes_check.get("model"):
+            models["yes_check"] = f"{yes_check.get('provider', '')} {yes_check['model']}"  # 20 Nov 2026
         return models
 
     def section(self, name: str) -> dict[str, Any]:

@@ -31,6 +31,7 @@ from typing import Any, Protocol
 
 from agents.agent_c.call_job import CallJob
 from agents.agent_c.guard.judge import CHANGED, NO, OTHER, STOP, UNCLEAR, YES, YesJudge, word_list_label
+from agents.agent_c.guard.yes_check import YesCheck
 from agents.agent_c.notebook import RESULT, YES_ANSWER, Note, Notebook
 from agents.agent_c.talker.language import StickyLanguage
 from agents.common.call_box import UNKNOWN, BoxClosing
@@ -115,8 +116,10 @@ class Guard:
     def __init__(self, door: Door, tools: Tools, box: Box, notebook: Notebook, desk: CallJob, judge: YesJudge,
                  words: SpokenWords, language: StickyLanguage, say: Callable[[str], Awaitable[None]],
                  send_mark: Callable[[str], Awaitable[None]], settings: GuardSettings, diary: Diary,
-                 hand_over: Callable[[str], Awaitable[Any]] | None = None) -> None:
+                 hand_over: Callable[[str], Awaitable[Any]] | None = None,
+                 yes_check: YesCheck | None = None) -> None:
         self._door = door
+        self._yes_check = yes_check  # Jev's "clear yes?" before the judge (yes_check.py); None: the judge alone
         self._tools = tools
         self._box = box
         self._notebook = notebook
@@ -234,9 +237,10 @@ class Guard:
             # The rest of a sentence that began with a yes: judged as one answer, from its start.
             words, start_ms = f"{moment.held} {words}".strip(), moment.held_start_ms
             moment.held, moment.held_start_ms = "", None
-        label = word_list_label(words, self._settings.stop_words)
+        # A listed "ruko"/"nahi" first, as always: no AI between the caller and a stop.
+        label, also_asks = word_list_label(words, self._settings.stop_words), False
         if label is None:
-            label = await self._judge.label(moment.question, words)
+            label, also_asks = await self._label(moment, words)
         early = start_ms is None or moment.played_ms is None or start_ms < moment.played_ms
         if label == YES and not early and not await self._caller_stayed_quiet(finished_at, begun):
             # 18 Nov 2026, food_04: "Haan, sahi hai." was confirmed while the caller went on
@@ -250,7 +254,21 @@ class Guard:
                 # caller's newest, so this yes is not kept for it. Never confirmed either.
                 self._diary.decision("yes dropped: a later answer came first", words=words)
             return
-        await self._decide(label, words, early, start_ms)
+        await self._decide(label, words, early, start_ms, also_asks)
+
+    async def _label(self, moment: YesMoment, words: str) -> tuple[str, bool]:
+        """The answer's label, and whether the caller also asked for something else. The yes
+        check first (yes_check.py: food_10 lost three yeses said with "aur rider ka number"):
+        a clear yes is a yes even with another request in it. Below its line, or with no
+        answer from it, the one-word judge labels the answer, as before 20 Nov 2026."""
+        if self._yes_check is not None:
+            answer = await self._yes_check.clear_yes(moment.question, words)
+            if answer is not None:
+                self._diary.decision("yes check", words=words, yes=round(answer.yes, 3),
+                                     also_asks=round(answer.also_asks, 3))
+                if answer.yes >= self._yes_check.line:
+                    return YES, answer.also_asks >= self._yes_check.line
+        return await self._judge.label(moment.question, words), False
 
     async def _caller_stayed_quiet(self, finished_at: float, begun: int) -> bool:
         """Wait until yes_hold_s after the turn ended (the judge's own time counts towards it),
@@ -276,7 +294,7 @@ class Guard:
             self._diary.decision("yes held too long: asked again", words=words)
             await self._ask(short=True)
 
-    async def _decide(self, label: str, words: str, early: bool, start_ms: int | None) -> None:
+    async def _decide(self, label: str, words: str, early: bool, start_ms: int | None, also_asks: bool = False) -> None:
         moment = self.moment
         if moment is None:
             return
@@ -288,7 +306,7 @@ class Guard:
             # Ask again, short: the caller may have meant it, but must say it after hearing it all.
             self._ask_soon(short=True)
         elif label == YES:
-            await self._yes(moment, words)
+            await self._yes(moment, words, also_asks)
         elif label in (NO, STOP):
             await self._stopped(moment, label, words)
         elif label == CHANGED:
@@ -305,8 +323,10 @@ class Guard:
             else:
                 self._ask_soon()
 
-    async def _yes(self, moment: YesMoment, words: str) -> None:
-        self._note_answer(f"yes: {words}")
+    async def _yes(self, moment: YesMoment, words: str, also_asks: bool = False) -> None:
+        # "also_asks": the yes came with another request ("aur rider ka number"); the Thinker
+        # answers that part while the change goes ahead (20 Nov 2026, food_10).
+        self._note_answer(f"yes: {words}", {"also_asks": True} if also_asks else None)
         self.moment, self.confirming = None, moment
         try:
             moment.ticket = await self._door.issue_ticket(moment.token)
@@ -428,8 +448,8 @@ class Guard:
         job = self._desk.job
         return job.version if job is not None else 0
 
-    def _note_answer(self, text: str) -> None:
-        self._notebook.add(YES_ANSWER, text, self._version())
+    def _note_answer(self, text: str, data: Mapping[str, Any] | None = None) -> None:
+        self._notebook.add(YES_ANSWER, text, self._version(), dict(data or {}))
 
     def _result(self, moment: YesMoment, outcome: str, reason: str, answer: Mapping[str, Any] | None = None) -> None:
         """The change's result note. A finished change carries the backend's answer, in its

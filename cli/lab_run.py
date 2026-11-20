@@ -85,6 +85,7 @@ def _agent_c(name: str) -> AgentRobot:
               "thinker_decide": str(thinker.get("decide_model", "")),
               "judge": f"{guard.get('judge_provider', 'gemini')} {guard['judge_model']}", "ears": data["ears"]["model"],
               "address_check": " ".join(str((data.get("address_check") or {}).get(k, "")) for k in ("provider", "model")).strip(),
+              "yes_check": " ".join(str((data.get("yes_check") or {}).get(k, "")) for k in ("provider", "model")).strip(),
               "voice": f"{data['voice']['model']}/{data['voice']['speaker']}"}
     # Decision 3: C runs in safe mode WITH the ticket check: only its Guard can confirm.
     return AgentRobot(name, "cli.agent_c", SAFE, ticket_check=True, models=models)

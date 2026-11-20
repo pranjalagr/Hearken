@@ -102,6 +102,19 @@ address_check:  # thinker/address_check.py (19 Nov 2026, the owner's idea)
   # The tool inputs it reads: the food pack's address change ("new_address"). A name, so here.
   inputs: [new_address]
 
+yes_check:  # guard/yes_check.py (20 Nov 2026, the owner's idea)
+  # Before the one-word judge: is the caller's answer a clear yes (alone, or with a separate
+  # request)? Jev, as the address check. Without the JEV_API_KEY the judge decides alone.
+  provider: jev
+  model: jev-latest
+  # A yes at or above this counts. On 24 answers from the 19 Nov run: 0.7 got 23 right (its one
+  # miss, "जी", was made up by the ears); 0.5 also took "Han, define." (0.65) and "Haan, lekin
+  # pehle batao..." (0.52). The same line says the caller also asked for something else.
+  line: 0.7
+  # One request's limit: in calls Jev answered in ~0.45 s, once 3.5 s. Past this the judge decides
+  # alone, so a slow Jev costs at most this much more before the yes is taken.
+  check_s: 2.0
+
 notebook:
   max_notes: 200  # decision 7: no call needs more; past it something is going round in circles
 

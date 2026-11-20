@@ -75,7 +75,7 @@ class ScriptedTalkerAI:
 
 def finder(**by_words: list[dict[str, str]]):
     """A scripted number finder: the tagged number words for each turn."""
-    async def find(words: str) -> list[dict[str, str]]:
+    async def find(words: str, asked: str = "") -> list[dict[str, str]]:
         return by_words.get(words, [])
     return find
 

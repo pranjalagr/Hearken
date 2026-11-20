@@ -107,6 +107,9 @@ class TalkerParts:
     language: Callable[[], str] = lambda: "hinglish"  # the sticky call language (decision 10)
     version: Callable[[], int] = lambda: 1  # the job's version, for each note (decision 16)
     new_turn: Callable[[], None] = lambda: None  # a caller turn during a job: older notes become old news
+    # The robot's last question, which the caller's turn answers: the number finder reads it
+    # (20 Nov 2026, food_08: "Paintalis saintalis" after "order number bataiye?" was tagged "other").
+    last_question: Callable[[], str] = lambda: ""
     reply_s: float = 8.0  # one AI reply's time limit (decision 30's Thinker step; a starting guess)
     # The Thinker's plan goes here to be said in place of the next waiting line (17 Nov 2026);
     # None: said at once (no waiting lines, as in tests of the graph alone).
@@ -305,7 +308,7 @@ async def collect_turn(state: TalkState, config) -> TalkState:
         return {"after": "wait_collect"}  # the AI answered and asked for the number
     numbers: list = []
     try:
-        numbers = await parts.find_numbers(words)
+        numbers = await parts.find_numbers(words, parts.last_question())
         heard = what_was_heard(numbers, words, parts.number_length)
         parts.on_step("number finder", {"words": words, "numbers": numbers, "heard": heard.what, "digits": heard.digits})
     except Exception as error:

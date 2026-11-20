@@ -1,0 +1,1 @@
+Besides answering the robot's yes-or-no question, the caller also asks a question or asks for something else in the same words ("aur rider ka number bhi chahiye", "mera doosra order bhi dekh lijiye"). Repeating what the question already says ("haan, refund 180 kar do") is not asking for something else.

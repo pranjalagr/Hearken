@@ -87,12 +87,14 @@ async def _guard(kit, tools: BackendTools, notebook: Notebook, answers: list[Any
         token = notebook.notes[seen - 1].data["data"]["token"]
         while answers:
             answer = answers.pop(0)
-            if isinstance(answer, tuple):  # ("other", words): asked something instead
+            if isinstance(answer, tuple) and answer[0] == "other":  # asked something instead
                 notebook.add(YES_ANSWER, f"other: {answer[1]}", 1)
                 await asyncio.sleep(0.01)
                 continue
-            if answer == "yes":
-                notebook.add(YES_ANSWER, "yes: haan", 1)
+            if isinstance(answer, tuple) or answer == "yes":
+                # ("yes_also", words): a yes that also asked for something (the Guard's yes check)
+                also = isinstance(answer, tuple)
+                notebook.add(YES_ANSWER, f"yes: {answer[1] if also else 'haan'}", 1, {"also_asks": True} if also else {})
                 ticket = await kit.guard.issue_ticket(token)
                 reply = await tools.call("confirm", {"token": token, "ticket": ticket})
                 notebook.add(RESULT, f"done: {reply.status}", 1, {"outcome": "done"})
@@ -717,3 +719,28 @@ async def test_no_answer_from_the_check_lets_the_change_go_on(open_call):
     notebook, tools, _ = await _address_job(kit, [_change(right)], FakeCheck(None))
     assert tools.calls == ["find_order", "prepare_change_address", "confirm"]
     assert (await kit.one("SELECT address FROM orders WHERE order_no = 4561"))["address"] == right
+
+
+async def test_a_yes_that_also_asks_for_something_makes_the_change_and_takes_up_the_request(open_call):
+    # 20 Nov 2026, food_10: "Haan, sahi hai. Refund 180 aur rider ka number chahiye" was "other"
+    # three times and the refund never happened. Now the Guard's yes check takes the yes and
+    # marks the other request: answer_other answers it while the change goes ahead, and the
+    # request is taken up after the result, as one said during the question.
+    kit = await open_call(FoodPack())
+    ai = ScriptedAI(check_number=[ok("4568")], after_explain=[{"exit": "person"}],
+                    answer_other=[{"exit": "new_request", "text": "Rider ka number ke baare mein abhi batata hoon.",
+                                   "request": "the rider's phone number"}],
+                    decide=[{"exit": "prepare", "tool": "prepare_refund_order",
+                             "inputs": {"item": "Veg Momos", "reason": "missing_item"}},
+                            {"exit": "cannot", "reason": "this line can't give the rider's number"}],
+                    explain=[{"exit": "note", "text": "Rider ka number nahi de sakte. Person se connect karun?"}])
+    notebook, tools, handed = await run(kit, "Momos nahi aaye", ai, [(None, ORDER_NUMBER, "4568"),
+                                                                    (RESULT, CALLER, "Haan, connect karo")],
+                                        [("yes_also", "Haan, sahi hai. Refund 180 aur rider ka number chahiye")])
+    assert tools.calls == ["find_order", "prepare_refund_order", "confirm"]
+    [other] = [facts for step, facts in ai.asked if step == "answer_other"]
+    assert other["caller_already_said_yes"] is True and other["caller_said"].startswith("Haan, sahi hai")
+    assert "rider" not in " ".join(other["this_line_can_do"]).lower()  # nothing to promise it from
+    assert other["waiting_for_yes"].startswith("refund") and "₹180" in other["waiting_for_yes"]
+    second_decide = [facts for step, facts in ai.asked if step == "decide"][1]
+    assert second_decide["handle_now"] == "the rider's phone number"

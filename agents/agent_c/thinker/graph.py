@@ -125,6 +125,7 @@ class JobState(TypedDict, total=False):
     last_key: str  # the newest press's key in `pressed`, taken back if its yes-question is dropped
     decided_version: int  # the job's version when the newest "decide" began
     redecides: int  # how often this change went back to "decide" after a dropped yes-question
+    waiting: str  # the backend's summary of the change waiting for a yes (answer_other's fact)
     input_sent_back: bool  # an input failed a check (the order number in it, or not the caller's address): sent back once
 
 
@@ -240,6 +241,19 @@ def _copy(parts: ThinkerParts, name: str, inputs: dict[str, Any], reply: ToolRep
     """Code copies the backend's answer into the notebook, exactly as it came (decision 16)."""
     kind, text, data = note_for_reply(ToolCall(name, inputs), reply)
     _write(parts, kind, text, data)
+
+
+def _can_do(parts: ThinkerParts) -> list[str]:
+    """What this line can do, in the tools' own words, plus a person: the facts an answer may
+    promise from (20 Nov 2026, food_10). Prepare and confirm are one change, so only once."""
+    tools = []
+    for spec in parts.menu:
+        if spec.name in (HAND_OVER, CONFIRM):
+            continue
+        # Safe mode's wording is for the agent ("Step 1 of 2 ... get a clear yes"): only what it does.
+        does = spec.description.removeprefix("Step 1 of 2. ").split(" Changes nothing yet")[0]
+        tools.append(f"{spec.name.removeprefix(PREPARE_PREFIX)}: {does}")
+    return tools + ["connect the caller to a person"]
 
 
 def _menu(parts: ThinkerParts) -> list[dict[str, Any]]:
@@ -423,7 +437,7 @@ async def press_tool(state: JobState, config) -> JobState:
     # the cancel made the next, unrelated "can't" hand over at once).
     if reply.status == OK and name.startswith(PREPARE_PREFIX) and reply.data.get("token"):
         return {"pressed": pressed, "last_key": key, "refusal": "", "explained": 0, "input_sent_back": False,
-                "after": "wait_yes"}
+                "waiting": str(reply.data.get("summary", "")), "after": "wait_yes"}
     if reply.status == OK:
         return {"pressed": pressed, "refusal": "", "explained": 0, "input_sent_back": False, "after": "complete"}
     if reply.status == REFUSED and reply.data.get("wrong_input"):
@@ -475,7 +489,9 @@ def after_wait_yes(state: JobState) -> str:
         return "refused_result"
     if note["kind"] == RESULT:
         return "complete"
-    if note["text"].startswith("other:"):
+    if note["text"].startswith("other:") or note.get("data", {}).get("also_asks"):
+        # A yes that also asked for something ("haan, aur rider ka number"): the change goes
+        # ahead, and that part is answered now (20 Nov 2026, food_10).
         return "answer_other"
     return "wait_yes"
 
@@ -523,9 +539,14 @@ async def answer_other(state: JobState, config) -> JobState:
     for after the yes moment (the user's choice, 17 Nov 2026, after food_10 lost one). The
     Guard asks the yes again either way."""
     parts = _parts(config)
-    said = state["note"]["text"].removeprefix("other:").strip()
-    facts = {"caller_said": said, "order": state.get("order", {}), "change": state.get("choice", {}),
-             "language": parts.language()}
+    said_yes = state["note"]["text"].startswith("yes:")
+    said = state["note"]["text"].removeprefix("other:").removeprefix("yes:").strip()
+    # Only facts, so it has nothing to make up (20 Nov 2026, food_10: with only decide's choice and
+    # no list of what the line can do, it promised the rider's number three times and said a
+    # refund was "process ho raha hai" before any yes). The backend's own summary of the waiting
+    # change holds its amount; decide's choice didn't.
+    facts = {"caller_said": said, "order": state.get("order", {}), "waiting_for_yes": state.get("waiting", ""),
+             "this_line_can_do": _can_do(parts), "caller_already_said_yes": said_yes, "language": parts.language()}
     answer = await _think(parts, "answer_other", facts, {"answer", "new_request"})
     _write(parts, ANSWER, str(answer.get("text", "")))
     if answer["exit"] == "new_request":

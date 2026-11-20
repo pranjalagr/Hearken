@@ -31,7 +31,9 @@ FIND_FORM = {"type": "object", "additionalProperties": False, "required": ["numb
                                "properties": {"words": {"type": "string"},
                                               "tag": {"type": "string", "enum": ["order", "other", "unsure"]}}}}}}
 
-FindNumbers = Callable[[str], Awaitable[list[dict[str, str]]]]
+# (the caller's words, the robot's last question) -> the tagged number words. The question
+# tells "order number" from "amount" or "address" (20 Nov 2026, food_08).
+FindNumbers = Callable[[str, str], Awaitable[list[dict[str, str]]]]
 
 # What the Talker does with a turn's order number.
 HEARD = "heard"  # one full number: say "number mil gaya" and pass it on
@@ -53,10 +55,11 @@ def sarvam_find(client: httpx.AsyncClient, model: str, rules: str | None = None,
     rules = rules or FIND_RULES.read_text(encoding="utf-8")
     answer_form = {"type": "json_schema", "json_schema": {"name": "numbers", "strict": True, "schema": FIND_FORM}}
 
-    async def find(words: str) -> list[dict[str, str]]:
+    async def find(words: str, asked: str = "") -> list[dict[str, str]]:
         # Thinking off with a null reasoning_effort: Sarvam refused "none" (8 Nov 2026).
+        turn = json.dumps({"robot_asked": asked, "caller_said": words}, ensure_ascii=False)
         body = {"model": model, "reasoning_effort": None, "response_format": answer_form,
-                "messages": [{"role": "system", "content": rules}, {"role": "user", "content": words}]}
+                "messages": [{"role": "system", "content": rules}, {"role": "user", "content": turn}]}
         async with timed(log, "sarvam", model, key, "number finder") as req:
             response = await client.post("/chat/completions", json=body)
             req.add(openai_style_details(response))

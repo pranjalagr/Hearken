@@ -229,3 +229,47 @@ async def test_the_address_check_never_blocks_a_change_by_failing():
     assert await broken.same_address(["x"], "y", "4530") is None
     assert await late.same_address(["x"], "y", "4530") is None
     assert len(errors) == 2 and "goes on unchecked" in errors[0]
+
+
+# ---- the number finder hears the robot's question too (20 Nov 2026) ---------------------------
+
+async def test_the_number_finder_sends_the_robots_question_with_the_callers_words():
+    # food_08: a bare "Paintalis saintalis" was tagged "other" five times; the finder never
+    # knew the robot had just asked for the order number.
+    import json
+    from agents.agent_c.talker.number_finder import sarvam_find
+
+    seen = []
+
+    def network(request):
+        seen.append(json.loads(request.content))
+        answer = {"numbers": [{"words": "Paintalis saintalis", "tag": "order"}]}
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(answer)}}]})
+
+    find = sarvam_find(httpx.AsyncClient(base_url="https://sarvam.test", transport=httpx.MockTransport(network)), "m")
+    assert await find("Paintalis saintalis", "Ji, aapka order number kya hai?") == [
+        {"words": "Paintalis saintalis", "tag": "order"}]
+    turn = json.loads(seen[0]["messages"][1]["content"])
+    assert turn == {"robot_asked": "Ji, aapka order number kya hai?", "caller_said": "Paintalis saintalis"}
+
+
+async def test_the_jev_yes_check_asks_both_questions_in_one_request():
+    from agents.agent_c.guard.yes_check import JevYesCheck
+
+    rows, seen = Rows(), []
+
+    def network(request):
+        seen.append(__import__("json").loads(request.content))
+        return httpx.Response(200, json={"answers": {"clear_yes": {"type": "noul", "noul": 0.97},
+                                                     "also_asks": {"type": "noul", "noul": 0.91}}})
+
+    check = JevYesCheck(httpx.AsyncClient(transport=httpx.MockTransport(network)), "jev-latest", 2.0, 0.7,
+                        "JEV_API_KEY", AiLog(rows.decision))
+    answer = await check.clear_yes("Order 4568 par ₹180 wapas bhej doon? Haan ya nahi?", "Haan, aur rider ka number")
+    assert (answer.yes, answer.also_asks) == (0.97, 0.91)
+    assert set(seen[0]["questions"]) == {"clear_yes", "also_asks"}
+    assert seen[0]["state"]["caller_said"] == "Haan, aur rider ka number"
+    assert rows.rows[0]["purpose"] == "yes check" and rows.rows[0]["key"] == "JEV_API_KEY"
+    broken = JevYesCheck(httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(503, json={}))),
+                         "jev-latest", 2.0, 0.7)
+    assert await broken.clear_yes("q", "haan") is None  # no answer: the judge decides alone

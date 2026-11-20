@@ -377,3 +377,77 @@ async def test_the_judge_asks_several_keys_at_once_and_takes_the_first_answer():
 
     with pytest.raises(RuntimeError):
         await first_answer(broken, 2)("q", "haan")  # every racer failed: unclear, never yes
+
+
+# ---- the yes check before the judge (20 Nov 2026) --------------------------------------------
+
+class FakeYesCheck:
+    """Jev's "clear yes?" with set answers; None is "no answer" (an error or too slow)."""
+
+    line = 0.7
+
+    def __init__(self, *answers):
+        self.answers = list(answers)
+        self.asked = []
+
+    async def clear_yes(self, question, words):
+        from agents.agent_c.guard.yes_check import YesCheckAnswer
+
+        self.asked.append(words)
+        answer = self.answers.pop(0)
+        return None if answer is None else YesCheckAnswer(*answer)
+
+
+def checked_rig(kit, judge, check):
+    rig = Rig(kit, judge)
+    rig.guard._yes_check = check
+    return rig
+
+
+async def test_a_clear_yes_with_another_request_confirms_and_marks_the_request(open_call):
+    # food_10: the judge said "other" to "Haan, sahi hai... aur rider ka number chahiye" three
+    # times and the refund never happened. The yes check takes the yes; the judge isn't asked.
+    kit = await open_call(FoodPack())
+    judge, check = FakeJudge(OTHER), FakeYesCheck((0.98, 0.9))
+    rig = checked_rig(kit, judge, check)
+    await rig.prepare()
+    await rig.question_played(at_ms=5000)
+    await rig.caller_says("Haan, sahi hai, aur rider ka number chahiye", started_ms=5100)
+    assert await rig.order_status() == "cancelled" and judge.asked == []
+    answer = rig.book.last((YES_ANSWER,))
+    assert answer.text.startswith("yes: Haan, sahi hai") and answer.data == {"also_asks": True}
+    row = [r for r in rig.sink.records if r.get("what") == "yes check"][0]
+    assert (row["yes"], row["also_asks"]) == (0.98, 0.9)
+
+
+async def test_under_the_yes_line_the_judge_decides(open_call):
+    # food_09's "Haan lekin SMS aayega na." got 0.12: not a clear yes, so the judge labels it.
+    kit = await open_call(FoodPack())
+    judge, check = FakeJudge(OTHER), FakeYesCheck((0.12, 0.8))
+    rig = checked_rig(kit, judge, check)
+    await rig.prepare()
+    await rig.question_played(at_ms=5000)
+    await rig.caller_says("Haan lekin SMS aayega na", started_ms=5100)
+    assert judge.asked == ["Haan lekin SMS aayega na"] and await rig.order_status() == "preparing"
+    assert rig.book.last((YES_ANSWER,)).text == "other: Haan lekin SMS aayega na"
+
+
+async def test_no_answer_from_the_yes_check_leaves_the_judge_alone(open_call):
+    kit = await open_call(FoodPack())
+    judge, check = FakeJudge(YES), FakeYesCheck(None)
+    rig = checked_rig(kit, judge, check)
+    await rig.prepare()
+    await rig.question_played(at_ms=5000)
+    await rig.caller_says("haan kar do", started_ms=5100)
+    assert await rig.order_status() == "cancelled" and judge.asked == ["haan kar do"]
+    assert rig.book.last((YES_ANSWER,)).data == {}
+
+
+async def test_a_listed_stop_word_never_waits_for_the_yes_check(open_call):
+    kit = await open_call(FoodPack())
+    judge, check = FakeJudge(), FakeYesCheck()
+    rig = checked_rig(kit, judge, check)
+    await rig.prepare()
+    await rig.question_played(at_ms=5000)
+    await rig.caller_says("ruko ruko", started_ms=5100)
+    assert check.asked == [] and judge.asked == [] and await rig.order_status() == "preparing"

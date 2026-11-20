@@ -55,6 +55,7 @@ from agents.agent_c.talker.speech_watch import SpeechWatch
 from agents.agent_c.talker.talker_ai import FailoverTalkerAI, GeminiTalkerAI, GroqTalkerAI, TalkerAI
 from agents.agent_c.thinker.graph import THINKER_GRAPH, ThinkerParts, run_job
 from agents.agent_c.thinker.address_check import AddressCheck, JevAddressCheck
+from agents.agent_c.guard.yes_check import JevYesCheck, YesCheck
 from agents.agent_c.thinker.step_brain import GeminiStepBrain, GroqStepBrain, StepBrain, StepRouter
 from agents.common.call_box import CallBox, CallBoxSettings, CallResult
 from agents.common.diary import NO_DIARY, Diary
@@ -264,7 +265,7 @@ class AgentC:
         talker_parts = TalkerParts(
             call.notebook, call, call.words, talker_ai, find, call.guard_port, start_thinker, call.end_call,
             self._settings.greeting, language=lambda: call.language.value, version=lambda: call.job.version,
-            new_turn=call.job.new_turn, number_length=int(self._settings.section("number_finder")["number_length"]),
+            new_turn=call.job.new_turn, last_question=lambda: call.last_question, number_length=int(self._settings.section("number_finder")["number_length"]),
             keypad_s=float(ladder["keypad_wait_s"]), max_sentences=int(self._settings.talker["max_sentences"]),
             reply_s=float(self._settings.section("talker_graph")["reply_s"]), hold_plan=call.quiet.hold_plan,
             on_error=self._diary.error,
@@ -273,7 +274,7 @@ class AgentC:
         if self._door is not None:
             call.guard = Guard(self._door, self._tools, box, call.notebook, call.job, self._yes_judge(cap), call.words,
                                call.language, call.say_question, line.send_mark, self._guard_settings, self._diary,
-                               hand_over=call.hand_over)
+                               hand_over=call.hand_over, yes_check=self._yes_check(self._settings.section("yes_check")))
 
     async def _cap_reached(self, line: RobotLine, box: CallBox, requests: int) -> None:
         # As Agent A: the wire first, so the lab records why the call ended, then the box.
@@ -309,6 +310,17 @@ class AgentC:
                                    timeout=limit_s, verify=_shared_tls())
         return JevAddressCheck(client, str(section["model"]), limit_s, self._keys.name(self._keys.jev), self._ai_log,
                                on_error=self._diary.error)
+
+    def _yes_check(self, section: dict[str, Any]) -> YesCheck | None:
+        """Jev's "clear yes?" for the Guard (guard/yes_check.py), or None: no Jev key, or a
+        provider this robot doesn't know. Then the judge decides alone, as before 20 Nov 2026."""
+        if section.get("provider") != JEV or not self._keys.jev:
+            return None
+        limit_s = float(section["check_s"])
+        client = httpx.AsyncClient(headers={"Authorization": f"Bearer {self._keys.jev}", "Content-Type": "application/json"},
+                                   timeout=limit_s, verify=_shared_tls())
+        return JevYesCheck(client, str(section["model"]), limit_s, float(section["line"]),
+                           self._keys.name(self._keys.jev), self._ai_log, on_error=self._diary.error)
 
     def _groq_ring(self, timeout_s: float) -> ClientRing:
         """One Groq client per key, the lab's current key first, taking turns request by request."""
@@ -464,6 +476,11 @@ class CallParts:
         self._spoken_waiters: list[tuple[str, asyncio.Future]] = []  # lines waiting to be heard to the end
         self._handed_over = False
         self._last_line = ""
+        # The robot's last question, for the number finder (20 Nov 2026, food_08): a bare
+        # "Paintalis saintalis" was tagged "other" five times because the finder never knew the
+        # robot had just asked for the order number. A question, not the last line: fillers like
+        # "Ji, ek second." come between the question and the answer.
+        self.last_question = ""
         self._last_said_at = -1e9  # when the last line was sent to the voice (the loop's clock)
         self._live_sent_at = -1e9  # when the last line went to the live voice (not a clip)
         self._clip_after_live = -1e9  # when a clip last waited for the live line before it
@@ -507,6 +524,8 @@ class CallParts:
         question's last words with what the voice said."""
         self._diary.said(said or text, filled=text)
         self._last_line = text
+        if "?" in text:
+            self.last_question = said or text
         loop = asyncio.get_running_loop()
         sound = self.clips.get(text) if clip else None
         if sound is not None:

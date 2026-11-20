@@ -1,0 +1,197 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1070" height="880" viewBox="0 0 1070 880" role="img" aria-label="The Talker graph as built in build_talker_graph: five waits, the steps each one routes to, and the steps every wait can reach."><defs><marker id="arrQ" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs><style>
+svg{--bg:#f6f7f4;--fg:#1d211c;--muted:#5c6658;--ai:#b6542a;--code:#2f6b4f;--card:#ffffff;color:var(--muted)}
+@media (prefers-color-scheme:dark){svg{--bg:#151814;--fg:#e8ece4;--muted:#9aa494;--ai:#e08a62;--code:#6fbf95;--card:#1c201b;}}
+.bg{fill:var(--card);stroke:var(--muted);stroke-opacity:.35}
+.box{fill:var(--card);stroke-width:2}
+.b-code{stroke:var(--code)}
+.b-ai{stroke:var(--ai);stroke-width:2.5}
+.b-wait{stroke:var(--fg);stroke-width:1.6;stroke-dasharray:2 3}
+.b-end{stroke:var(--fg);stroke-width:2}
+.ln{fill:none;stroke:currentColor;stroke-width:1.6}
+.ln-d{stroke-dasharray:4 3}
+.dot{fill:currentColor}
+.t-mono{fill:var(--fg);font-family:ui-monospace,"Cascadia Code",Consolas,Menlo,monospace;font-size:12.5px;font-weight:600;text-anchor:middle}
+.t-kind{font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:10px;text-anchor:middle}
+.k-ai{fill:var(--ai);font-weight:600}
+.k-code{fill:var(--code);font-weight:600}
+.k-wait{fill:var(--muted)}
+.pill{fill:var(--bg);stroke:var(--muted);stroke-width:1}
+.t-pill{fill:var(--fg);font-family:ui-monospace,"Cascadia Code",Consolas,Menlo,monospace;font-size:11px;text-anchor:middle}
+.lbl,.lbl-s,.lbl-e{fill:var(--fg);font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:500}
+.lbl{text-anchor:middle}.lbl-s{text-anchor:start}.lbl-e{text-anchor:end}
+.lblbg{fill:var(--card)}
+</style><rect class="bg" x="0.5" y="0.5" width="1069" height="879" rx="12"/>
+<rect class="box b-end" x="65.0" y="10.0" width="90" height="36" rx="18"/>
+<text class="t-mono" x="110" y="32">START</text>
+<rect class="box b-code" x="25.0" y="92.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="110" y="109">greet</text>
+<text class="t-kind k-code" x="110" y="122">code</text>
+<rect class="box b-wait" x="25.0" y="192.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="110" y="209">wait_no_job</text>
+<text class="t-kind k-wait" x="110" y="222">waits (interrupt)</text>
+<rect class="box b-wait" x="235.0" y="192.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="320" y="209">wait_collect</text>
+<text class="t-kind k-wait" x="320" y="222">waits (interrupt)</text>
+<rect class="box b-wait" x="445.0" y="192.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="530" y="209">wait_keypad</text>
+<text class="t-kind k-wait" x="530" y="222">waits (interrupt)</text>
+<rect class="box b-wait" x="655.0" y="192.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="740" y="209">wait_job</text>
+<text class="t-kind k-wait" x="740" y="222">waits (interrupt)</text>
+<rect class="box b-wait" x="865.0" y="192.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="950" y="209">wait_yes</text>
+<text class="t-kind k-wait" x="950" y="222">waits (interrupt)</text>
+<rect class="box b-ai" x="25.0" y="312.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="110" y="329">no_job_turn</text>
+<text class="t-kind k-ai" x="110" y="342">AI step</text>
+<rect class="box b-ai" x="235.0" y="312.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="320" y="329">collect_turn</text>
+<text class="t-kind k-ai" x="320" y="342">AI step</text>
+<rect class="box b-code" x="445.0" y="312.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="530" y="329">keypad_key</text>
+<text class="t-kind k-code" x="530" y="342">code</text>
+<rect class="box b-ai" x="655.0" y="312.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="740" y="329">job_turn</text>
+<text class="t-kind k-ai" x="740" y="342">AI step</text>
+<rect class="box b-code" x="865.0" y="312.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="950" y="329">yes_turn</text>
+<text class="t-kind k-code" x="950" y="342">code</text>
+<rect class="box b-code" x="25.0" y="412.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="110" y="429">open_job</text>
+<text class="t-kind k-code" x="110" y="442">code</text>
+<rect class="box b-code" x="445.0" y="412.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="530" y="429">keypad_timeout</text>
+<text class="t-kind k-code" x="530" y="442">code</text>
+<rect class="box b-code" x="865.0" y="412.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="950" y="429">yes_key</text>
+<text class="t-kind k-code" x="950" y="442">code</text>
+<rect class="box b-code" x="445.0" y="512.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="530" y="529">ask_again</text>
+<text class="t-kind k-code" x="530" y="542">code</text>
+<rect class="box b-code" x="95.0" y="732.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="180" y="749">say_note</text>
+<text class="t-kind k-code" x="180" y="762">code</text>
+<rect class="box b-code" x="345.0" y="732.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="430" y="749">hand_over</text>
+<text class="t-kind k-code" x="430" y="762">code</text>
+<rect class="box b-code" x="565.0" y="732.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="650" y="749">goodbye</text>
+<text class="t-kind k-code" x="650" y="762">code</text>
+<rect class="box b-code" x="795.0" y="732.0" width="170" height="36" rx="7"/>
+<text class="t-mono" x="880" y="749">job_closed</text>
+<text class="t-kind k-code" x="880" y="762">code</text>
+<rect class="box b-end" x="495.0" y="832.0" width="90" height="36" rx="18"/>
+<text class="t-mono" x="540" y="854">END</text>
+<polyline class="ln" points="110,47.0 110,91.0" marker-end="url(#arrQ)"/>
+<polyline class="ln" points="110,129.0 110,191.0" marker-end="url(#arrQ)"/>
+<polyline class="ln" points="92,229.0 92,311.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="59.4" y="264" width="29.6" height="14"/>
+<text class="lbl-e" x="86" y="274">TURN</text>
+<polyline class="ln" points="128,311.0 128,229.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="131.0" y="264" width="35.5" height="14"/>
+<text class="lbl-s" x="134" y="274">reply</text>
+<polyline class="ln" points="110,349.0 110,411.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="113.0" y="374" width="65.0" height="14"/>
+<text class="lbl-s" x="116" y="384">&quot;open_job&quot;</text>
+<polyline class="ln" points="24.0,330 12,330 12,481" marker-end="url(#arrQ)"/>
+<rect class="pill" x="10.2" y="481" width="63.6" height="18" rx="9"/>
+<text class="t-pill" x="42" y="494">goodbye</text>
+<rect class="lblbg" x="13.0" y="460" width="65.0" height="14"/>
+<text class="lbl-s" x="16" y="470">&quot;end_call&quot;</text>
+<polyline class="ln" points="196.0,430 270,430 270,349.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="273.0" y="410" width="65.0" height="14"/>
+<text class="lbl-s" x="276" y="420">fixed edge</text>
+<polyline class="ln" points="302,229.0 302,311.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="269.4" y="264" width="29.6" height="14"/>
+<text class="lbl-e" x="296" y="274">TURN</text>
+<polyline class="ln" points="338,311.0 338,229.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="341.0" y="264" width="88.6" height="14"/>
+<text class="lbl-s" x="344" y="274">no full number</text>
+<polyline class="ln" points="360,349.0 360,382" marker-end="url(#arrQ)"/>
+<rect class="pill" x="324.8" y="382" width="70.4" height="18" rx="9"/>
+<text class="t-pill" x="360" y="395">wait_job</text>
+<rect class="lblbg" x="280.2" y="362" width="76.8" height="14"/>
+<text class="lbl-e" x="354" y="372">number given</text>
+<polyline class="ln" points="512,229.0 512,311.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="485.3" y="264" width="23.7" height="14"/>
+<text class="lbl-e" x="506" y="274">KEY</text>
+<polyline class="ln" points="548,311.0 548,229.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="551.0" y="264" width="65.0" height="14"/>
+<text class="lbl-s" x="554" y="274">&lt; 4 digits</text>
+<polyline class="ln" points="444.0,222 432,222 432,430 444.0,430" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="434.0" y="385" width="47.3" height="14"/>
+<text class="lbl-s" x="437" y="395">TIMEOUT</text>
+<polyline class="ln" points="444.0,206 420,206 420,322 406.0,322" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="422.0" y="290" width="29.6" height="14"/>
+<text class="lbl-s" x="425" y="300">TURN</text>
+<polyline class="ln" points="616.0,338 640,338 640,371" marker-end="url(#arrQ)"/>
+<rect class="pill" x="619.8" y="371" width="70.4" height="18" rx="9"/>
+<text class="t-pill" x="655" y="384">wait_job</text>
+<rect class="lblbg" x="645.0" y="352" width="82.7" height="14"/>
+<text class="lbl-s" x="648" y="362">4 digits or #</text>
+<polyline class="ln" points="530,449.0 530,511.0" marker-end="url(#arrQ)"/>
+<polyline class="ln" points="450,549.0 450,601" marker-end="url(#arrQ)"/>
+<rect class="pill" x="401.2" y="601" width="97.6" height="18" rx="9"/>
+<text class="t-pill" x="450" y="614">wait_collect</text>
+<polyline class="ln" points="560,549.0 560,601" marker-end="url(#arrQ)"/>
+<rect class="pill" x="514.6" y="601" width="90.8" height="18" rx="9"/>
+<text class="t-pill" x="560" y="614">wait_keypad</text>
+<polyline class="ln" points="616.0,530 675,530 675,601" marker-end="url(#arrQ)"/>
+<rect class="pill" x="639.8" y="601" width="70.4" height="18" rx="9"/>
+<text class="t-pill" x="675" y="614">wait_job</text>
+<rect class="lblbg" x="453.0" y="570" width="53.2" height="14"/>
+<text class="lbl-s" x="456" y="580">miss 1-2</text>
+<rect class="lblbg" x="563.0" y="570" width="41.4" height="14"/>
+<text class="lbl-s" x="566" y="580">miss 3</text>
+<rect class="lblbg" x="678.0" y="550" width="124.0" height="14"/>
+<text class="lbl-s" x="681" y="560">miss 4: asks used up</text>
+<polyline class="ln" points="722,229.0 722,311.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="689.4" y="264" width="29.6" height="14"/>
+<text class="lbl-e" x="716" y="274">TURN</text>
+<polyline class="ln" points="758,311.0 758,229.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="761.0" y="264" width="76.8" height="14"/>
+<text class="lbl-s" x="764" y="274">(fixed edge)</text>
+<polyline class="ln" points="932,229.0 932,311.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="899.4" y="264" width="29.6" height="14"/>
+<text class="lbl-e" x="926" y="274">TURN</text>
+<polyline class="ln" points="968,311.0 968,229.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="971.0" y="264" width="47.3" height="14"/>
+<text class="lbl-s" x="974" y="274">(fixed)</text>
+<polyline class="ln" points="1036.0,204 1050,204 1050,424 1036.0,424" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="1024.3" y="290" width="23.7" height="14"/>
+<text class="lbl-e" x="1045" y="300">KEY</text>
+<polyline class="ln" points="1036.0,438 1062,438 1062,218 1036.0,218" marker-end="url(#arrQ)"/>
+<rect class="pill" x="20" y="650" width="1030" height="40" rx="14" style="fill:none"/>
+<rect class="lblbg" x="381.5" y="655" width="306.9" height="14"/>
+<text class="lbl" x="535" y="665">from EVERY wait_* node (drawn once, not five times)</text>
+<rect class="lblbg" x="390.4" y="672" width="289.2" height="14"/>
+<text class="lbl" x="535" y="682">any other event at a wait: back to the same wait</text>
+<polyline class="ln" points="180,691 180,731.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="183.0" y="704" width="165.3" height="14"/>
+<text class="lbl-s" x="186" y="714">NOTE (not the Talker&#x27;s own)</text>
+<polyline class="ln" points="430,691 430,731.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="433.0" y="704" width="59.1" height="14"/>
+<text class="lbl-s" x="436" y="714">HAND_OVER</text>
+<polyline class="ln" points="650,691 650,731.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="653.0" y="704" width="141.7" height="14"/>
+<text class="lbl-s" x="656" y="714">JOB_CLOSED, caller done</text>
+<polyline class="ln" points="880,691 880,731.0" marker-end="url(#arrQ)"/>
+<rect class="lblbg" x="883.0" y="704" width="65.0" height="14"/>
+<text class="lbl-s" x="886" y="714">JOB_CLOSED</text>
+<polyline class="ln" points="180,769.0 180,794" marker-end="url(#arrQ)"/>
+<rect class="pill" x="34.0" y="794" width="152.0" height="18" rx="9"/>
+<text class="t-pill" x="110" y="807">the same wait (mode)</text>
+<rect class="pill" x="214.8" y="794" width="70.4" height="18" rx="9"/>
+<text class="t-pill" x="250" y="807">wait_job</text>
+<rect class="pill" x="31.200000000000003" y="818" width="97.6" height="18" rx="9"/>
+<text class="t-pill" x="80" y="831">wait_collect</text>
+<rect class="pill" x="144.8" y="818" width="70.4" height="18" rx="9"/>
+<text class="t-pill" x="180" y="831">wait_yes</text>
+<rect class="pill" x="231.4" y="818" width="77.19999999999999" height="18" rx="9"/>
+<text class="t-pill" x="270" y="831">ask_again</text>
+<polyline class="ln" points="430,769.0 430,850 494.0,850" marker-end="url(#arrQ)"/>
+<polyline class="ln" points="650,769.0 650,850 586.0,850" marker-end="url(#arrQ)"/>
+<polyline class="ln" points="880,769.0 880,794" marker-end="url(#arrQ)"/>
+<rect class="pill" x="834.6" y="794" width="90.8" height="18" rx="9"/>
+<text class="t-pill" x="880" y="807">wait_no_job</text>
+</svg>

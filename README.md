@@ -127,153 +127,17 @@ sequenceDiagram
 
 One graph runs per job, from its first step until the job closes. In each step the AI may think and decide, but only among that step's own exits. Code checks the exit, presses every tool and copies every backend answer into the notebook.
 
-Node names are the code's own ([agents/agent_c/thinker/graph.py](agents/agent_c/thinker/graph.py)). Rectangles are AI steps, double-sided boxes are code, rounded boxes are waits: the graph pauses there until a note arrives.
+Drawn exactly as [`build_thinker_graph`](agents/agent_c/thinker/graph.py) builds it: every node and every edge its routers can take, under the names in the code. Orange boxes are AI steps, green boxes are code, dotted boxes are waits (a LangGraph interrupt: the graph pauses until a note arrives), and a small grey tag is a jump to the node of that name, drawn once elsewhere.
 
-```mermaid
-%%{init: {'theme':'dark'}}%%
-flowchart TD
-    S((job opens)) --> wait_number
-    wait_number(["wait_number<br/>waits for the order number"])
-    person_check["person_check<br/>AI: does the caller want a person?"]
-    check_number["check_number<br/>AI checks the digits against the caller's words"]
-    find_order[["find_order<br/>code presses the lookup"]]
-    decide["decide<br/>AI picks the request and the tool"]
-    write_plan[["write_plan<br/>code writes the AI's plan"]]
-    press_tool[["press_tool<br/>address check, then code presses the tool"]]
-    wait_yes(["wait_yes<br/>the Guard asks yes or no"])
-    answer_other["answer_other<br/>AI answers from the facts only"]
-    yes_dropped[["yes_dropped<br/>the question is stale or was changed"]]
-    refused_result[["refused_result<br/>refused at confirm"]]
-    complete[["complete"]]
-    explain["explain<br/>AI says why and offers a person"]
-    after_explain["after_explain<br/>AI reads the reply"]
-    work_left["work_left<br/>AI: anything else?"]
-    hand_over[["hand_over<br/>code presses the hand-over"]]
-    wait_reply_decide(["wait_reply_decide"])
-    wait_reply_explain(["wait_reply_explain"])
-    wait_reply_complete(["wait_reply_complete"])
-    E((job closes))
-
-    wait_number -->|order-number note| check_number
-    wait_number -->|caller turn| person_check
-    wait_number -->|asks used up| hand_over
-    person_check -->|no| wait_number
-    person_check -->|person| hand_over
-    check_number -->|unclear: ask again| wait_number
-    check_number -->|checked| find_order
-    find_order -->|found| decide
-    find_order -->|not found: ask again| wait_number
-    find_order -->|lookup failed| explain
-    decide -->|lookup: answered from the order| complete
-    decide -->|prepare a change| write_plan
-    decide -->|a detail is missing| wait_reply_decide
-    decide -->|order number inside an input: once more| decide
-    decide -->|no tool can do it| explain
-    decide -->|person| hand_over
-    write_plan --> press_tool
-    press_tool -->|token: needs a yes| wait_yes
-    press_tool -->|done, no yes needed| complete
-    press_tool -->|wrong input, or not the caller's address| decide
-    press_tool -->|address wrong twice: ask the caller| wait_reply_decide
-    press_tool -->|refused| explain
-    press_tool -->|same step keeps failing| hand_over
-    wait_yes -->|result| complete
-    wait_yes -->|refused at confirm| refused_result
-    wait_yes -->|other, or a yes with another request| answer_other
-    wait_yes -->|stale question, or the caller changed it| yes_dropped
-    wait_yes -->|a plain yes or no: wait for the result| wait_yes
-    answer_other --> wait_yes
-    yes_dropped --> decide
-    refused_result --> explain
-    complete -->|a request saved during the question| decide
-    complete -->|anything else?| wait_reply_complete
-    explain -->|explained| wait_reply_explain
-    explain -->|explained before, caller insists| hand_over
-    wait_reply_decide -->|caller's reply| decide
-    wait_reply_explain -->|caller's reply| after_explain
-    wait_reply_complete -->|caller's reply| work_left
-    wait_reply_decide -->|a new order number| check_number
-    wait_reply_explain -->|a new order number| check_number
-    wait_reply_complete -->|a new order number| check_number
-    after_explain -->|something else| decide
-    after_explain -->|person| hand_over
-    after_explain -->|accepts| E
-    work_left -->|more| decide
-    work_left -->|person| hand_over
-    work_left -->|AI stuck: ask again| wait_reply_complete
-    work_left -->|done| E
-    hand_over --> E
-```
+![The Thinker graph: every node and edge as build_thinker_graph builds them](docs/graphs/thinker.svg)
 
 ### The Talker graph
 
 One graph runs per call. It waits at the step it reached between events and never starts over. An event is a caller turn, a key press, or a note from the Thinker or the Guard.
 
-Node names are the code's own ([agents/agent_c/talker/graph.py](agents/agent_c/talker/graph.py)), with the same shapes as above.
+Drawn exactly as [`build_talker_graph`](agents/agent_c/talker/graph.py) builds it, with the same colours. The four steps at the bottom can be reached from every wait, so they are drawn once.
 
-```mermaid
-%%{init: {'theme':'dark'}}%%
-flowchart TD
-    subgraph waits [the call waits here between events]
-        wait_no_job(["wait_no_job"])
-        wait_collect(["wait_collect"])
-        wait_job(["wait_job"])
-        wait_yes(["wait_yes"])
-        wait_keypad(["wait_keypad"])
-    end
-    S((call starts)) --> greet[["greet"]]
-    greet --> wait_no_job
-    no_job_turn["no_job_turn<br/>AI replies: real work, done, or just talk?"]
-    open_job[["open_job<br/>code starts the Thinker"]]
-    collect_turn["collect_turn<br/>AI: a number? finder points, code reads the digits"]
-    job_turn["job_turn<br/>AI replies while the Thinker works"]
-    yes_turn[["yes_turn<br/>the Guard judges the answer"]]
-    yes_key[["yes_key<br/>the Guard reads key 1 or 2"]]
-    say_note[["say_note<br/>says the note, picks the next wait"]]
-    ask_again[["ask_again<br/>again, digit by digit, keypad"]]
-    keypad_key[["keypad_key"]]
-    keypad_timeout[["keypad_timeout"]]
-    job_closed[["job_closed"]]
-    goodbye[["goodbye"]]
-    hand_over[["hand_over"]]
-    E((hang up))
-
-    waits -->|a note from the Thinker or the Guard| say_note
-    waits -->|hand-over| hand_over
-    waits -->|job closed, caller done| goodbye
-    waits -->|job closed, caller not done| job_closed
-    wait_no_job -->|caller turn| no_job_turn
-    wait_collect -->|caller turn| collect_turn
-    wait_job -->|caller turn| job_turn
-    wait_yes -->|caller turn| yes_turn
-    wait_yes -->|key| yes_key
-    wait_keypad -->|key| keypad_key
-    wait_keypad -->|no key in time| keypad_timeout
-    wait_keypad -->|caller turn| collect_turn
-    no_job_turn -->|real work or a person| open_job
-    no_job_turn -->|caller is done| goodbye
-    no_job_turn -->|just a reply| wait_no_job
-    open_job --> collect_turn
-    collect_turn -->|number heard| wait_job
-    collect_turn -->|no full number: ask for it| wait_collect
-    job_turn --> wait_job
-    yes_turn --> wait_yes
-    yes_key --> wait_yes
-    say_note -->|needs a yes: the Guard asks| wait_yes
-    say_note -->|order not found| ask_again
-    say_note -->|number unreadable| wait_collect
-    say_note -->|result or found order| wait_job
-    say_note -->|other notes: the same wait| waits
-    ask_again -->|say it again, digit by digit| wait_collect
-    ask_again -->|type it on the keypad| wait_keypad
-    ask_again -->|asks used up: the Thinker hands over| wait_job
-    keypad_key -->|more digits| wait_keypad
-    keypad_key -->|4 digits or hash| wait_job
-    keypad_timeout --> ask_again
-    job_closed --> wait_no_job
-    goodbye --> E
-    hand_over --> E
-```
+![The Talker graph: five waits, the steps each one routes to, and the steps every wait can reach](docs/graphs/talker.svg)
 
 ### What the AI decides and what code does
 
